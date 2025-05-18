@@ -1,6 +1,7 @@
 package server
 
 import (
+	"creatorsync-go/internal/clerk"
 	"creatorsync-go/internal/email"
 	"fmt"
 	"os"
@@ -16,7 +17,7 @@ func (s *FiberServer) RegisterFiberRoutes() {
 	if env == "production" {
 		allowedOrigins = "https://creatorsync.app,https://www.creatorsync.app"
 	} else {
-		allowedOrigins = "http://localhost:5173,http://localhost:5174"
+		allowedOrigins = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
 	}
 
 	s.App.Use(cors.New(cors.Config{
@@ -27,9 +28,18 @@ func (s *FiberServer) RegisterFiberRoutes() {
 		MaxAge:           300,
 	}))
 
+	// Public routes
 	s.App.Get("/", s.HelloWorldHandler)
 	s.App.Get("/health", s.healthHandler)
 	s.App.Post("/api/waitlist", s.joinWaitlistHandler)
+
+	// Protected routes group
+	api := s.App.Group("/api")
+	api.Use(clerk.AuthMiddleware())
+
+	// User routes
+	api.Get("/user", s.getCurrentUserHandler)
+	api.Get("/user/profile", s.getUserProfileHandler)
 }
 
 func (s *FiberServer) HelloWorldHandler(c *fiber.Ctx) error {
@@ -75,5 +85,38 @@ func (s *FiberServer) joinWaitlistHandler(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"message": "Successfully joined waitlist",
+	})
+}
+
+func (s *FiberServer) getCurrentUserHandler(c *fiber.Ctx) error {
+	user, err := clerk.GetUserFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User not authenticated",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"user": user,
+	})
+}
+
+func (s *FiberServer) getUserProfileHandler(c *fiber.Ctx) error {
+	user, err := clerk.GetUserFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User not authenticated",
+		})
+	}
+
+	clerkUser, err := clerk.GetUserByID(c.Context(), user.ID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fmt.Sprintf("Failed to get user profile: %v", err),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"profile": clerkUser,
 	})
 }

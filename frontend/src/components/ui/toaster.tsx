@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Toast, ToastProvider, ToastViewport } from '../toaster';
+import { ToastProvider, ToastViewport } from '../toaster';
 
 export function Toaster() {
     return (

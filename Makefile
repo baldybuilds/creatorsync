@@ -1,18 +1,25 @@
-# Build the application
+# Project-level variables
+APP_NAME=main
+BACKEND_DIR=backend
+CMD_ENTRY=$(BACKEND_DIR)/cmd/api/main.go
+BIN_OUTPUT=$(APP_NAME)
+
+# Default: build + test
 all: build test
 
+# Build backend from correct directory
 build:
 	@echo "Building..."
-	
-	
-	@go build -o main cmd/api/main.go
+	cd $(BACKEND_DIR) && go build -o ../$(BIN_OUTPUT) ./cmd/api
 
-# Run the application
+# Run backend and frontend together
 run:
-	@go run cmd/api/main.go &
-	@npm install --prefer-offline --no-fund --prefix ./frontend
-	@npm run dev --prefix ./frontend
-# Create DB container
+	@echo "Running backend and frontend..."
+	cd $(BACKEND_DIR) && go run ./cmd/api &
+	npm install --prefer-offline --no-fund --prefix ./frontend
+	npm run dev --prefix ./frontend
+
+# Compose up (supports Docker v2 fallback to v1)
 docker-run:
 	@if docker compose up --build 2>/dev/null; then \
 		: ; \
@@ -21,7 +28,7 @@ docker-run:
 		docker-compose up --build; \
 	fi
 
-# Shutdown DB container
+# Compose down
 docker-down:
 	@if docker compose down 2>/dev/null; then \
 		: ; \
@@ -30,35 +37,34 @@ docker-down:
 		docker-compose down; \
 	fi
 
-# Test the application
+# Unit tests
 test:
-	@echo "Testing..."
-	@go test ./... -v
-# Integrations Tests for the application
+	@echo "Running tests..."
+	cd $(BACKEND_DIR) && go test ./... -v
+
+# Integration tests
 itest:
 	@echo "Running integration tests..."
-	@go test ./internal/database -v
+	cd $(BACKEND_DIR) && go test ./internal/database -v
 
-# Clean the binary
+# Clean built binary
 clean:
 	@echo "Cleaning..."
-	@rm -f main
+	@rm -f $(BIN_OUTPUT)
 
-# Live Reload
+# Live reload using Air
 watch:
 	@if command -v air > /dev/null; then \
-            air; \
-            echo "Watching...";\
-        else \
-            read -p "Go's 'air' is not installed on your machine. Do you want to install it? [Y/n] " choice; \
-            if [ "$$choice" != "n" ] && [ "$$choice" != "N" ]; then \
-                go install github.com/air-verse/air@latest; \
-                air; \
-                echo "Watching...";\
-            else \
-                echo "You chose not to install air. Exiting..."; \
-                exit 1; \
-            fi; \
-        fi
+		cd $(BACKEND_DIR) && air; \
+	else \
+		read -p "Go's 'air' is not installed. Install it now? [Y/n] " choice; \
+		if [ "$$choice" != "n" ] && [ "$$choice" != "N" ]; then \
+			go install github.com/air-verse/air@latest; \
+			cd $(BACKEND_DIR) && air; \
+		else \
+			echo "Air not installed. Exiting..."; \
+			exit 1; \
+		fi; \
+	fi
 
 .PHONY: all build run test clean watch docker-run docker-down itest

@@ -22,8 +22,8 @@ func New() (*FiberServer, error) {
 
 	server := &FiberServer{
 		App: fiber.New(fiber.Config{
-			ServerHeader: "creatorsync-go",
-			AppName:      "creatorsync-go",
+			ServerHeader: "creatorsync",
+			AppName:      "creatorsync",
 		}),
 
 		db: database.New(),

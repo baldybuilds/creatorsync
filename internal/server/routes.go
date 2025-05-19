@@ -40,11 +40,14 @@ func (s *FiberServer) RegisterFiberRoutes() {
 	// User routes
 	api.Get("/user", s.getCurrentUserHandler)
 	api.Get("/user/profile", s.getUserProfileHandler)
+
+	// Register Twitch routes
+	s.registerTwitchRoutes(api)
 }
 
 func (s *FiberServer) HelloWorldHandler(c *fiber.Ctx) error {
 	resp := fiber.Map{
-		"message": "Hello World",
+		"message": "The Server is running!",
 	}
 
 	return c.JSON(resp)
@@ -120,3 +123,5 @@ func (s *FiberServer) getUserProfileHandler(c *fiber.Ctx) error {
 		"profile": clerkUser,
 	})
 }
+
+// registerTwitchRoutes are implemented in twitch.go

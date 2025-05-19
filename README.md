@@ -1,6 +1,6 @@
 # CreatorSync
 
-CreatorSync is a comprehensive content management platform designed specifically for digital creators. It streamlines the process of managing, scheduling, and analyzing content across multiple platforms, helping creators focus on what they do best - creating amazing content.
+CreatorSync is a comprehensive content management platform designed specifically for streamers. It streamlines the process of managing, scheduling, and analyzing content across multiple platforms, helping creators focus on what they do best - creating amazing content.
 
 ## 🚀 Mission
 

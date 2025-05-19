@@ -48,7 +48,7 @@ func (s *FiberServer) RegisterFiberRoutes() {
 
 func (s *FiberServer) HelloWorldHandler(c *fiber.Ctx) error {
 	resp := fiber.Map{
-		"message": "The Server is running!",
+		"message": "The Server is running!!",
 	}
 
 	return c.JSON(resp)

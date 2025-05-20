@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Code, Sparkles, Zap, Clock, Users } from 'lucide-react';
+import { Code, Sparkles, Zap, Clock } from 'lucide-react';
 import * as Separator from '@radix-ui/react-separator';
 
 export function About() {
@@ -26,7 +26,7 @@ export function About() {
 
   const stats = [
     { icon: Clock, value: '70%', label: 'Time Saved', description: 'Creators save up to 70% of their editing time' },
-    { icon: Users, value: '500+', label: 'Beta Testers', description: 'Growing community of content creators' },
+    // { icon: Users, value: '500+', label: 'Beta Testers', description: 'Growing community of content creators' },
     { icon: Zap, value: '10x', label: 'Faster Workflow', description: 'Publish content 10x faster across platforms' }
   ];
 
@@ -44,7 +44,7 @@ export function About() {
             <Sparkles className="w-4 h-4" />
             <span>Our Mission</span>
           </div>
-          
+
           <h2 className="text-4xl md:text-5xl font-bold mb-6">
             <span className="text-light-surface-900 dark:text-dark-surface-100">Built by creators,</span>{' '}
             <span className="text-gradient">for creators</span>
@@ -66,11 +66,11 @@ export function About() {
               <div className="relative bg-light-surface-100/95 dark:bg-dark-surface-900/95 backdrop-blur-sm rounded-xl p-8">
                 <h3 className="text-2xl font-bold mb-4 text-light-surface-900 dark:text-dark-surface-100">Our Story</h3>
                 <p className="text-light-surface-700 dark:text-dark-surface-300 mb-4">
-                  CreatorSync began when our founder, a Twitch streamer, spent countless hours manually editing clips for different social platforms. 
+                  CreatorSync began when our founder, a Twitch streamer, spent countless hours manually editing clips for different social platforms.
                   The process was tedious, repetitive, and took time away from creating new content.
                 </p>
                 <p className="text-light-surface-700 dark:text-dark-surface-300">
-                  We built CreatorSync to solve this problem once and for all — a platform that automates the tedious parts of content repurposing 
+                  We built CreatorSync to solve this problem once and for all — a platform that automates the tedious parts of content repurposing
                   while giving creators complete control over their brand and style.
                 </p>
                 <Separator.Root className="my-6 h-px bg-light-surface-200/50 dark:bg-dark-surface-800/50" />
@@ -91,7 +91,7 @@ export function About() {
             className="grid grid-cols-1 gap-6"
           >
             {stats.map((stat, index) => (
-              <div 
+              <div
                 key={index}
                 className="bg-light-surface-100/95 dark:bg-dark-surface-900/95 backdrop-blur-sm rounded-xl p-6 border border-light-surface-200/50 dark:border-dark-surface-800/50 flex items-center gap-6"
               >
@@ -118,7 +118,7 @@ export function About() {
         >
           <h3 className="text-2xl font-bold mb-4 text-light-surface-900 dark:text-dark-surface-100">Our Vision</h3>
           <p className="text-xl text-light-surface-700 dark:text-dark-surface-300 max-w-3xl mx-auto leading-relaxed">
-            We envision a world where creators can focus on what they do best — creating amazing content — 
+            We envision a world where creators can focus on what they do best — creating amazing content —
             while CreatorSync handles the technical aspects of repurposing and distribution.
           </p>
         </motion.div>

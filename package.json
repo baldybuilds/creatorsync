@@ -1,0 +1,32 @@
+{
+  "name": "creatorsync",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "lint:frontend": "cd frontend && npm run lint",
+    "lint:frontend:fix": "cd frontend && npm run lint:fix",
+    "lint:check": "lint-staged",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "frontend/src/**/*.{js,jsx,ts,tsx}": [
+      "cd frontend && eslint --fix",
+      "cd frontend && prettier --write"
+    ],
+    "backend/src/**/*.{js,ts}": [
+      "cd backend && eslint --fix"
+    ]
+  },
+  "devDependencies": {
+    "husky": "^9.0.0",
+    "lint-staged": "^15.0.0"
+  }
+}

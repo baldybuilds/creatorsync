@@ -14,7 +14,7 @@
     "lint:frontend": "cd frontend && npm run lint",
     "lint:frontend:fix": "cd frontend && npm run lint:fix",
     "lint:check": "lint-staged",
-    "prepare": "command -v git >/dev/null 2>&1 && test -d .git && husky || echo 'Skipping husky installation'"
+    "prepare": "npx husky install"
   },
   "lint-staged": {
     "frontend/src/**/*.{js,jsx,ts,tsx}": [

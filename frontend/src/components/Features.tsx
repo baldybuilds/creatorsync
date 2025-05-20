@@ -1,174 +1,341 @@
-import { useState, useEffect } from 'react';
-import { Play, Edit3, Download, Zap, Users, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
-import { FeatureCard } from './FeatureCard';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { Play, Edit3, Download, Zap, Users, Clock, Sparkles, ArrowRight, CheckCircle } from 'lucide-react';
+import * as Tabs from '@radix-ui/react-tabs';
+import * as Accordion from '@radix-ui/react-accordion';
+import { cn } from '@/lib/utils';
+
+type FeatureType = {
+  id: string;
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  benefits: string[];
+  color: string;
+};
 
 export function Features() {
-    const [activeFeatureIndex, setActiveFeatureIndex] = useState<number | null>(null);
-    const [isAutoPlaying, setIsAutoPlaying] = useState(true);
+  const [isVisible, setIsVisible] = useState(false);
+  const [activeTab, setActiveTab] = useState('feature1');
+  const [isAutoRotating, setIsAutoRotating] = useState(true);
+  const autoRotateIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-    const features = [
-        {
-            icon: Play,
-            title: "Auto-Import Clips",
-            description: "Instantly access your latest Twitch clips and streams from a unified dashboard.",
-            delay: 0
-        },
-        {
-            icon: Edit3,
-            title: "Browser-Based Editor",
-            description: "No downloads needed. Edit your clips directly in the browser with our powerful editor.",
-            delay: 200
-        },
-        {
-            icon: Zap,
-            title: "Lightning Fast Rendering",
-            description: "High-quality video rendering in seconds, not minutes. Powered by AWS Lambda.",
-            delay: 400
-        },
-        {
-            icon: Users,
-            title: "Multi-Platform Export",
-            description: "Optimize for TikTok, YouTube Shorts, Instagram Reels, and more with one click.",
-            delay: 600
-        },
-        {
-            icon: Clock,
-            title: "Time-Saving Automation",
-            description: "Batch process multiple clips and schedule posts. Save hours of manual work.",
-            delay: 800
-        },
-        {
-            icon: Download,
-            title: "Instant Downloads",
-            description: "Get your edited clips immediately. No waiting, no hassle, no complicated exports.",
-            delay: 1000
+  // Handle visibility detection
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
         }
-    ];
-
-    // Auto-rotate through features
-    useEffect(() => {
-        if (!isAutoPlaying) return;
-
-        const interval = setInterval(() => {
-            setActiveFeatureIndex(prev => {
-                if (prev === null) return 0;
-                return (prev + 1) % features.length;
-            });
-        }, 5000);
-
-        return () => clearInterval(interval);
-    }, [isAutoPlaying, features.length]);
-
-    // Pause auto-rotation when user interacts with a feature
-    const handleFeatureClick = (index: number) => {
-        setIsAutoPlaying(false);
-        setActiveFeatureIndex(index);
-    };
-
-    const navigateFeature = (direction: 'prev' | 'next') => {
-        setIsAutoPlaying(false);
-        setActiveFeatureIndex(prev => {
-            if (prev === null) return direction === 'next' ? 0 : features.length - 1;
-            const newIndex = direction === 'next' ? prev + 1 : prev - 1;
-            return (newIndex + features.length) % features.length;
-        });
-    };
-
-    return (
-        <section className="py-32 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
-            {/* Background with animated gradient */}
-            <div className="absolute inset-0 bg-gradient-to-b from-surface-950/50 to-surface-900/50">
-                <div className="absolute inset-0 opacity-20">
-                    <div className="absolute top-0 -left-4 w-72 h-72 bg-brand-500/30 rounded-full filter blur-3xl animate-blob"></div>
-                    <div className="absolute top-0 -right-4 w-72 h-72 bg-accent-500/20 rounded-full filter blur-3xl animate-blob animation-delay-2000"></div>
-                    <div className="absolute -bottom-8 left-20 w-72 h-72 bg-purple-500/30 rounded-full filter blur-3xl animate-blob animation-delay-4000"></div>
-                </div>
-            </div>
-
-            <div className="max-w-7xl mx-auto relative z-10">
-                {/* Section Header with animation */}
-                <motion.div
-                    className="text-center mb-20"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.6 }}
-                >
-                    <h2 className="text-5xl md:text-7xl font-bold mb-8">
-                        <span className="text-surface-100">Everything you need</span>
-                        <br />
-                        <motion.span
-                            className="text-gradient"
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ delay: 0.3, duration: 0.5 }}
-                        >
-                            to go viral
-                        </motion.span>
-                    </h2>
-
-                    <p className="text-xl md:text-2xl text-surface-300 max-w-4xl mx-auto leading-relaxed">
-                        Stop wasting hours on manual editing. CreatorSync automates your content workflow
-                        so you can focus on what matters—<span className="text-brand-500">creating amazing content</span>.
-                    </p>
-                </motion.div>
-
-                {/* Feature navigation controls */}
-                <div className="flex justify-center mb-12 gap-4">
-                    <button
-                        onClick={() => navigateFeature('prev')}
-                        className="p-3 rounded-full bg-surface-800 hover:bg-surface-700 transition-colors duration-300"
-                        aria-label="Previous feature"
-                    >
-                        <ChevronLeft className="w-6 h-6 text-surface-200" />
-                    </button>
-
-                    <div className="flex items-center gap-2">
-                        {features.map((_, index) => (
-                            <button
-                                key={index}
-                                onClick={() => handleFeatureClick(index)}
-                                className={`w-3 h-3 rounded-full transition-all duration-300 ${activeFeatureIndex === index ? 'bg-brand-500 scale-125' : 'bg-surface-600 hover:bg-surface-500'}`}
-                                aria-label={`Go to feature ${index + 1}`}
-                            />
-                        ))}
-                    </div>
-
-                    <button
-                        onClick={() => navigateFeature('next')}
-                        className="p-3 rounded-full bg-surface-800 hover:bg-surface-700 transition-colors duration-300"
-                        aria-label="Next feature"
-                    >
-                        <ChevronRight className="w-6 h-6 text-surface-200" />
-                    </button>
-                </div>
-
-                {/* Features Grid with improved layout */}
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 lg:gap-12">
-                    {features.map((feature, index) => (
-                        <FeatureCard
-                            key={index}
-                            icon={feature.icon}
-                            title={feature.title}
-                            description={feature.description}
-                            delay={feature.delay}
-                            isActive={activeFeatureIndex === index}
-                            onClick={() => handleFeatureClick(index)}
-                        />
-                    ))}
-                </div>
-
-                {/* Auto-play toggle */}
-                <div className="mt-12 flex justify-center">
-                    <button
-                        onClick={() => setIsAutoPlaying(!isAutoPlaying)}
-                        className={`px-4 py-2 rounded-full text-sm transition-colors duration-300 flex items-center gap-2 ${isAutoPlaying ? 'bg-brand-500/20 text-brand-300' : 'bg-surface-800 text-surface-300 hover:bg-surface-700'}`}
-                    >
-                        <div className={`w-3 h-3 rounded-full ${isAutoPlaying ? 'bg-brand-500' : 'bg-surface-600'}`}></div>
-                        {isAutoPlaying ? 'Auto-play enabled' : 'Auto-play disabled'}
-                    </button>
-                </div>
-            </div>
-        </section>
+      },
+      { threshold: 0.1 }
     );
+
+    const section = document.getElementById('features-section');
+    if (section) observer.observe(section);
+
+    return () => {
+      if (section) observer.unobserve(section);
+    };
+  }, []);
+  
+  // Auto-rotation functionality
+  useEffect(() => {
+    if (!isAutoRotating) {
+      if (autoRotateIntervalRef.current) {
+        clearInterval(autoRotateIntervalRef.current);
+        autoRotateIntervalRef.current = null;
+      }
+      return;
+    }
+    
+    const rotateFeatures = () => {
+      setActiveTab(currentTab => {
+        const currentIndex = features.findIndex(f => f.id === currentTab);
+        const nextIndex = (currentIndex + 1) % features.length;
+        return features[nextIndex].id;
+      });
+    };
+    
+    // Start rotation after a delay to allow the user to see the first feature
+    const initialDelay = setTimeout(() => {
+      rotateFeatures();
+      autoRotateIntervalRef.current = setInterval(rotateFeatures, 5000);
+    }, 3000);
+    
+    return () => {
+      clearTimeout(initialDelay);
+      if (autoRotateIntervalRef.current) {
+        clearInterval(autoRotateIntervalRef.current);
+      }
+    };
+  }, [isAutoRotating]);
+  
+  // Pause auto-rotation when user manually selects a tab
+  const handleTabChange = (tabId: string) => {
+    setIsAutoRotating(false);
+    setActiveTab(tabId);
+  };
+
+  const features: FeatureType[] = [
+    {
+      id: 'feature1',
+      icon: Play,
+      title: "Auto-Import Clips",
+      description: "Instantly access your latest Twitch clips and streams from a unified dashboard. Connect your accounts once and we'll handle the rest.",
+      benefits: [
+        "Automatic clip detection and import",
+        "Smart categorization by game, date, and popularity",
+        "Bulk import and organization tools"
+      ],
+      color: "from-blue-500 to-indigo-500"
+    },
+    {
+      id: 'feature2',
+      icon: Edit3,
+      title: "Browser-Based Editor",
+      description: "No downloads needed. Edit your clips directly in the browser with our powerful editor designed specifically for short-form content.",
+      benefits: [
+        "Professional editing tools in your browser",
+        "Custom templates for different platforms",
+        "Collaborative editing with team members"
+      ],
+      color: "from-purple-500 to-pink-500"
+    },
+    {
+      id: 'feature3',
+      icon: Zap,
+      title: "Lightning Fast Rendering",
+      description: "High-quality video rendering in seconds, not minutes. Our cloud-based rendering engine delivers professional results instantly.",
+      benefits: [
+        "Cloud-based rendering powered by AWS",
+        "4K support with no quality loss",
+        "Background processing while you work on other clips"
+      ],
+      color: "from-amber-500 to-orange-500"
+    },
+    {
+      id: 'feature4',
+      icon: Users,
+      title: "Multi-Platform Export",
+      description: "Optimize for TikTok, YouTube Shorts, Instagram Reels, and more with one click. Each export is perfectly formatted for its destination.",
+      benefits: [
+        "Platform-specific aspect ratios and formats",
+        "Automatic caption generation",
+        "Hashtag recommendations for each platform"
+      ],
+      color: "from-emerald-500 to-teal-500"
+    },
+    {
+      id: 'feature5',
+      icon: Clock,
+      title: "Time-Saving Automation",
+      description: "Batch process multiple clips and schedule posts. Set it and forget it with our powerful automation tools that save you hours.",
+      benefits: [
+        "Batch processing for multiple clips",
+        "Smart scheduling for optimal posting times",
+        "Automated cross-posting across platforms"
+      ],
+      color: "from-rose-500 to-red-500"
+    },
+    {
+      id: 'feature6',
+      icon: Download,
+      title: "Instant Downloads",
+      description: "Get your edited clips immediately. No waiting, no hassle, no complicated exports. Just click and download in any format you need.",
+      benefits: [
+        "Multiple format options (MP4, MOV, GIF)",
+        "Custom quality settings",
+        "Direct downloads to your device"
+      ],
+      color: "from-cyan-500 to-blue-500"
+    }
+  ];
+
+  return (
+    <section id="features-section" className="py-24 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+
+      <div className="max-w-7xl mx-auto relative z-10">
+        <motion.div
+          className="text-center mb-16"
+          initial={{ opacity: 0, y: 20 }}
+          animate={isVisible ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
+          transition={{ duration: 0.6 }}
+        >
+          <div className="flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-brand-500/20 border border-brand-500/30 text-brand-300 text-sm mb-6 backdrop-blur-xl w-fit mx-auto">
+            <Sparkles className="w-4 h-4" />
+            <span>Powerful Features</span>
+          </div>
+          
+          <h2 className="text-4xl md:text-5xl font-bold mb-6">
+            <span className="text-light-surface-900 dark:text-dark-surface-100">Everything you need</span>{' '}
+            <span className="text-gradient">to go viral</span>
+          </h2>
+
+          <p className="text-xl text-light-surface-700 dark:text-dark-surface-300 max-w-3xl mx-auto leading-relaxed">
+            Stop wasting hours on manual editing. CreatorSync automates your content workflow
+            so you can focus on what matters—creating amazing content.
+          </p>
+        </motion.div>
+
+        {/* Desktop View - Tabs */}
+        <div className="hidden md:block">
+          <Tabs.Root 
+            value={activeTab} 
+            onValueChange={handleTabChange}
+            className="w-full"
+          >
+            <div className="flex flex-col items-center space-y-6 mb-12">
+              <Tabs.List 
+                className="flex flex-wrap justify-center gap-4"
+                aria-label="Features"
+              >
+              {features.map((feature) => (
+                <Tabs.Trigger
+                  key={feature.id}
+                  value={feature.id}
+                  className={cn(
+                    "group relative px-6 py-3 rounded-full transition-all duration-300 outline-none",
+                    activeTab === feature.id 
+                      ? "bg-brand-500/20 text-brand-500 border border-brand-500/30" 
+                      : "bg-light-surface-100/80 dark:bg-dark-surface-800/80 text-light-surface-700 dark:text-dark-surface-300 hover:bg-light-surface-200/80 dark:hover:bg-dark-surface-700/80 border border-light-surface-200/50 dark:border-dark-surface-700/50"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <feature.icon className="w-5 h-5" />
+                    <span className="font-medium">{feature.title}</span>
+                  </div>
+                </Tabs.Trigger>
+              ))}
+              </Tabs.List>
+              
+              <button
+                onClick={() => setIsAutoRotating(!isAutoRotating)}
+                className={`px-4 py-2 rounded-full text-sm transition-colors duration-300 flex items-center gap-2 ${isAutoRotating ? 'bg-brand-500/20 text-brand-500 border border-brand-500/30' : 'bg-light-surface-100/80 dark:bg-dark-surface-800/80 text-light-surface-700 dark:text-dark-surface-300 border border-light-surface-200/50 dark:border-dark-surface-700/50'}`}
+              >
+                <div className={`w-2 h-2 rounded-full ${isAutoRotating ? 'bg-brand-500 animate-pulse' : 'bg-light-surface-400 dark:bg-dark-surface-600'}`}></div>
+                {isAutoRotating ? 'Auto-rotation enabled' : 'Auto-rotation disabled'}
+              </button>
+            </div>
+
+            {features.map((feature) => (
+              <Tabs.Content 
+                key={feature.id}
+                value={feature.id}
+                className="focus:outline-none"
+              >
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.4 }}
+                  className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center"
+                >
+                  {/* Feature Content */}
+                  <div className="order-2 lg:order-1">
+                    <h3 className="text-3xl font-bold mb-4 text-light-surface-900 dark:text-dark-surface-100">
+                      {feature.title}
+                    </h3>
+                    <p className="text-xl text-light-surface-700 dark:text-dark-surface-300 mb-8">
+                      {feature.description}
+                    </p>
+                    
+                    <div className="space-y-4">
+                      {feature.benefits.map((benefit, idx) => (
+                        <div key={idx} className="flex items-start gap-3">
+                          <div className="flex-shrink-0 mt-1">
+                            <CheckCircle className="w-5 h-5 text-brand-500" />
+                          </div>
+                          <p className="text-light-surface-700 dark:text-dark-surface-300">
+                            {benefit}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    <div className="mt-8">
+                      <button className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-brand-500 hover:bg-brand-600 text-white font-medium transition-colors">
+                        Try this feature
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Feature Visual */}
+                  <div className="order-1 lg:order-2 flex justify-center">
+                    <div className="relative">
+                      <div className={`absolute inset-0 bg-gradient-to-br ${feature.color} opacity-20 blur-2xl rounded-full`}></div>
+                      <div className="relative bg-light-surface-100/90 dark:bg-dark-surface-900/90 backdrop-blur-sm rounded-2xl p-8 border border-light-surface-200/50 dark:border-dark-surface-800/50 shadow-xl">
+                        <div className="w-full aspect-video rounded-lg bg-light-surface-200/50 dark:bg-dark-surface-800/50 flex items-center justify-center overflow-hidden">
+                          <div className={`p-6 rounded-full bg-gradient-to-br ${feature.color}`}>
+                            <feature.icon className="w-16 h-16 text-white" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              </Tabs.Content>
+            ))}
+          </Tabs.Root>
+        </div>
+
+        {/* Mobile View - Accordion */}
+        <div className="md:hidden">
+          <div className="flex items-center justify-center mb-4">
+            <button
+              onClick={() => setIsAutoRotating(!isAutoRotating)}
+              className={`px-4 py-2 rounded-full text-sm transition-colors duration-300 flex items-center gap-2 ${isAutoRotating ? 'bg-brand-500/20 text-brand-500 border border-brand-500/30' : 'bg-light-surface-100/80 dark:bg-dark-surface-800/80 text-light-surface-700 dark:text-dark-surface-300 border border-light-surface-200/50 dark:border-dark-surface-700/50'}`}
+            >
+              <div className={`w-2 h-2 rounded-full ${isAutoRotating ? 'bg-brand-500' : 'bg-light-surface-400 dark:bg-dark-surface-600'}`}></div>
+              {isAutoRotating ? 'Auto-rotate on' : 'Auto-rotate off'}
+            </button>
+          </div>
+          <Accordion.Root type="single" collapsible className="space-y-4">
+            {features.map((feature, index) => (
+              <Accordion.Item 
+                key={feature.id} 
+                value={feature.id}
+                className="overflow-hidden rounded-xl border border-light-surface-200/50 dark:border-dark-surface-800/50 bg-light-surface-100/90 dark:bg-dark-surface-900/90 backdrop-blur-sm"
+              >
+                <Accordion.Trigger className="group flex w-full items-center justify-between px-5 py-4 text-left">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-full bg-gradient-to-br ${feature.color}`}>
+                      <feature.icon className="w-5 h-5 text-white" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-light-surface-900 dark:text-dark-surface-100">
+                      {feature.title}
+                    </h3>
+                  </div>
+                  <div className="rounded-full border border-light-surface-300/50 dark:border-dark-surface-700/50 p-1">
+                    <ArrowRight className="w-4 h-4 text-light-surface-700 dark:text-dark-surface-300 transition-transform duration-300 group-data-[state=open]:rotate-90" />
+                  </div>
+                </Accordion.Trigger>
+                <Accordion.Content className="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
+                  <div className="px-5 pb-5 pt-2">
+                    <p className="text-light-surface-700 dark:text-dark-surface-300 mb-4">
+                      {feature.description}
+                    </p>
+                    
+                    <div className="space-y-2">
+                      {feature.benefits.map((benefit, idx) => (
+                        <div key={idx} className="flex items-start gap-2">
+                          <div className="flex-shrink-0 mt-1">
+                            <CheckCircle className="w-4 h-4 text-brand-500" />
+                          </div>
+                          <p className="text-sm text-light-surface-700 dark:text-dark-surface-300">
+                            {benefit}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </Accordion.Content>
+              </Accordion.Item>
+            ))}
+          </Accordion.Root>
+        </div>
+      </div>
+    </section>
+  );
 }

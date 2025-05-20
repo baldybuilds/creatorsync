@@ -9,13 +9,7 @@ export function Hero() {
     }, []);
 
     return (
-        <section className="min-h-screen flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 relative overflow-hidden">
-            {/* Background Elements */}
-            <div className="absolute inset-0">
-                <div className="absolute inset-0 bg-gradient-to-br from-brand-500/5 via-transparent to-accent-500/5" />
-                <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-brand-500/10 blur-3xl animate-float" />
-                <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-accent-500/10 blur-3xl animate-float" style={{ animationDelay: '2s' }} />
-            </div>
+        <section className="min-h-screen flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 relative overflow-hidden pt-24">
 
             <div className="max-w-6xl text-center relative z-10">
                 {/* Badge */}
@@ -33,7 +27,7 @@ export function Hero() {
                         <span className="text-gradient">Sync</span>
                     </h1>
 
-                    <p className="text-xl md:text-3xl text-light-surface-700 dark:text-dark-surface-300 max-w-5xl mx-auto leading-relaxed">
+                    <p className="text-xl md:text-2xl text-light-surface-700 dark:text-dark-surface-300 max-w-5xl mx-auto leading-relaxed">
                         Transform your Twitch clips & vods into viral moments across{' '}
                         <span className="text-brand-500">all platforms</span>.{' '}
                         <br className="hidden md:block" />

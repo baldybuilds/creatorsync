@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Star, Quote } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
+import Image from 'next/image';
 import { cn } from '@/lib/utils';
 
 interface Testimonial {
@@ -84,7 +85,7 @@ export function Testimonials() {
             <Star className="w-4 h-4" />
             <span>Creator Testimonials</span>
           </div>
-          
+
           <h2 className="text-4xl md:text-5xl font-bold mb-6">
             <span className="text-light-surface-900 dark:text-dark-surface-100">Loved by</span>{' '}
             <span className="text-gradient">content creators</span>
@@ -95,12 +96,12 @@ export function Testimonials() {
           </p>
         </motion.div>
 
-        <Tabs.Root 
-          value={activeTab} 
+        <Tabs.Root
+          value={activeTab}
           onValueChange={setActiveTab}
           className="w-full"
         >
-          <Tabs.List 
+          <Tabs.List
             className="flex flex-wrap justify-center gap-4 mb-12"
             aria-label="Creator testimonials"
           >
@@ -110,19 +111,21 @@ export function Testimonials() {
                 value={testimonial.id}
                 className={cn(
                   "group relative px-6 py-3 rounded-full transition-all duration-300 outline-none",
-                  activeTab === testimonial.id 
-                    ? "bg-brand-500/20 text-brand-500 border border-brand-500/30" 
+                  activeTab === testimonial.id
+                    ? "bg-brand-500/20 text-brand-500 border border-brand-500/30"
                     : "bg-light-surface-100/80 dark:bg-dark-surface-800/80 text-light-surface-700 dark:text-dark-surface-300 hover:bg-light-surface-200/80 dark:hover:bg-dark-surface-700/80 border border-light-surface-200/50 dark:border-dark-surface-700/50"
                 )}
               >
                 <div className="flex items-center gap-3">
-                  <img 
-                    src={testimonial.avatar} 
-                    alt={testimonial.name} 
+                  <Image
+                    src={testimonial.avatar}
+                    alt={testimonial.name}
+                    width={32}
+                    height={32}
                     className={cn(
-                      "w-8 h-8 rounded-full object-cover transition-all duration-300",
-                      activeTab === testimonial.id 
-                        ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-light-surface-50 dark:ring-offset-dark-surface-950" 
+                      "rounded-full object-cover transition-all duration-300",
+                      activeTab === testimonial.id
+                        ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-light-surface-50 dark:ring-offset-dark-surface-950"
                         : ""
                     )}
                   />
@@ -133,7 +136,7 @@ export function Testimonials() {
           </Tabs.List>
 
           {testimonials.map((testimonial) => (
-            <Tabs.Content 
+            <Tabs.Content
               key={testimonial.id}
               value={testimonial.id}
               className="focus:outline-none"
@@ -147,33 +150,35 @@ export function Testimonials() {
               >
                 <div className="flex flex-col md:flex-row gap-8 items-center md:items-start">
                   <div className="flex-shrink-0">
-                    <img 
-                      src={testimonial.avatar} 
-                      alt={testimonial.name} 
-                      className="w-24 h-24 rounded-full object-cover ring-4 ring-brand-500/20"
+                    <Image
+                      src={testimonial.avatar}
+                      alt={testimonial.name}
+                      width={96}
+                      height={96}
+                      className="rounded-full object-cover ring-4 ring-brand-500/20"
                     />
                   </div>
-                  
+
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
                       {[...Array(5)].map((_, i) => (
-                        <Star 
-                          key={i} 
+                        <Star
+                          key={i}
                           className={cn(
-                            "w-5 h-5", 
+                            "w-5 h-5",
                             i < testimonial.rating ? "text-yellow-400 fill-yellow-400" : "text-light-surface-300 dark:text-dark-surface-700"
-                          )} 
+                          )}
                         />
                       ))}
                     </div>
-                    
+
                     <div className="relative">
                       <Quote className="absolute -top-2 -left-2 w-8 h-8 text-brand-500/20" />
                       <p className="text-xl text-light-surface-900 dark:text-dark-surface-100 italic mb-6 pl-6">
                         {testimonial.quote}
                       </p>
                     </div>
-                    
+
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-light-surface-700 dark:text-dark-surface-300">
                       <div className="font-semibold text-light-surface-900 dark:text-dark-surface-100">
                         {testimonial.name}

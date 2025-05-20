@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Play, Edit3, Download, Zap, Users, Clock, Sparkles, ArrowRight, CheckCircle } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -20,64 +20,8 @@ export function Features() {
   const [isAutoRotating, setIsAutoRotating] = useState(true);
   const autoRotateIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Handle visibility detection
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    const section = document.getElementById('features-section');
-    if (section) observer.observe(section);
-
-    return () => {
-      if (section) observer.unobserve(section);
-    };
-  }, []);
-  
-  // Auto-rotation functionality
-  useEffect(() => {
-    if (!isAutoRotating) {
-      if (autoRotateIntervalRef.current) {
-        clearInterval(autoRotateIntervalRef.current);
-        autoRotateIntervalRef.current = null;
-      }
-      return;
-    }
+  const features = useMemo<FeatureType[]>(() => [
     
-    const rotateFeatures = () => {
-      setActiveTab(currentTab => {
-        const currentIndex = features.findIndex(f => f.id === currentTab);
-        const nextIndex = (currentIndex + 1) % features.length;
-        return features[nextIndex].id;
-      });
-    };
-    
-    // Start rotation after a delay to allow the user to see the first feature
-    const initialDelay = setTimeout(() => {
-      rotateFeatures();
-      autoRotateIntervalRef.current = setInterval(rotateFeatures, 5000);
-    }, 3000);
-    
-    return () => {
-      clearTimeout(initialDelay);
-      if (autoRotateIntervalRef.current) {
-        clearInterval(autoRotateIntervalRef.current);
-      }
-    };
-  }, [isAutoRotating]);
-  
-  // Pause auto-rotation when user manually selects a tab
-  const handleTabChange = (tabId: string) => {
-    setIsAutoRotating(false);
-    setActiveTab(tabId);
-  };
-
-  const features: FeatureType[] = [
     {
       id: 'feature1',
       icon: Play,
@@ -150,7 +94,54 @@ export function Features() {
       ],
       color: "from-cyan-500 to-blue-500"
     }
-  ];
+  ], []);
+
+  // Handle visibility detection
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const section = document.getElementById('features-section');
+    if (section) observer.observe(section);
+
+    return () => {
+      if (section) observer.unobserve(section);
+    };
+  }, []);
+
+  // Auto-rotate tabs
+  useEffect(() => {
+    if (isAutoRotating) {
+      // Initial delay before starting rotation
+      const initialDelay = setTimeout(() => {
+        autoRotateIntervalRef.current = setInterval(() => {
+          // Find current index and get next index
+          const currentIndex = features.findIndex(f => f.id === activeTab);
+          const nextIndex = (currentIndex + 1) % features.length;
+          setActiveTab(features[nextIndex].id);
+        }, 5000); // Rotate every 5 seconds
+      }, 3000); // 3 second initial delay
+
+      return () => {
+        clearTimeout(initialDelay);
+        if (autoRotateIntervalRef.current) {
+          clearInterval(autoRotateIntervalRef.current);
+        }
+      };
+    }
+  }, [isAutoRotating, activeTab, features]);
+
+  // Pause auto-rotation when user manually selects a tab
+  const handleTabChange = (tabId: string) => {
+    setIsAutoRotating(false);
+    setActiveTab(tabId);
+  };
 
   return (
     <section id="features-section" className="py-24 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
@@ -166,7 +157,7 @@ export function Features() {
             <Sparkles className="w-4 h-4" />
             <span>Powerful Features</span>
           </div>
-          
+
           <h2 className="text-4xl md:text-5xl font-bold mb-6">
             <span className="text-light-surface-900 dark:text-dark-surface-100">Everything you need</span>{' '}
             <span className="text-gradient">to go viral</span>
@@ -180,35 +171,35 @@ export function Features() {
 
         {/* Desktop View - Tabs */}
         <div className="hidden md:block">
-          <Tabs.Root 
-            value={activeTab} 
+          <Tabs.Root
+            value={activeTab}
             onValueChange={handleTabChange}
             className="w-full"
           >
             <div className="flex flex-col items-center space-y-6 mb-12">
-              <Tabs.List 
+              <Tabs.List
                 className="flex flex-wrap justify-center gap-4"
                 aria-label="Features"
               >
-              {features.map((feature) => (
-                <Tabs.Trigger
-                  key={feature.id}
-                  value={feature.id}
-                  className={cn(
-                    "group relative px-6 py-3 rounded-full transition-all duration-300 outline-none",
-                    activeTab === feature.id 
-                      ? "bg-brand-500/20 text-brand-500 border border-brand-500/30" 
-                      : "bg-light-surface-100/80 dark:bg-dark-surface-800/80 text-light-surface-700 dark:text-dark-surface-300 hover:bg-light-surface-200/80 dark:hover:bg-dark-surface-700/80 border border-light-surface-200/50 dark:border-dark-surface-700/50"
-                  )}
-                >
-                  <div className="flex items-center gap-3">
-                    <feature.icon className="w-5 h-5" />
-                    <span className="font-medium">{feature.title}</span>
-                  </div>
-                </Tabs.Trigger>
-              ))}
+                {features.map((feature) => (
+                  <Tabs.Trigger
+                    key={feature.id}
+                    value={feature.id}
+                    className={cn(
+                      "group relative px-6 py-3 rounded-full transition-all duration-300 outline-none",
+                      activeTab === feature.id
+                        ? "bg-brand-500/20 text-brand-500 border border-brand-500/30"
+                        : "bg-light-surface-100/80 dark:bg-dark-surface-800/80 text-light-surface-700 dark:text-dark-surface-300 hover:bg-light-surface-200/80 dark:hover:bg-dark-surface-700/80 border border-light-surface-200/50 dark:border-dark-surface-700/50"
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <feature.icon className="w-5 h-5" />
+                      <span className="font-medium">{feature.title}</span>
+                    </div>
+                  </Tabs.Trigger>
+                ))}
               </Tabs.List>
-              
+
               <button
                 onClick={() => setIsAutoRotating(!isAutoRotating)}
                 className={`px-4 py-2 rounded-full text-sm transition-colors duration-300 flex items-center gap-2 ${isAutoRotating ? 'bg-brand-500/20 text-brand-500 border border-brand-500/30' : 'bg-light-surface-100/80 dark:bg-dark-surface-800/80 text-light-surface-700 dark:text-dark-surface-300 border border-light-surface-200/50 dark:border-dark-surface-700/50'}`}
@@ -219,7 +210,7 @@ export function Features() {
             </div>
 
             {features.map((feature) => (
-              <Tabs.Content 
+              <Tabs.Content
                 key={feature.id}
                 value={feature.id}
                 className="focus:outline-none"
@@ -239,7 +230,7 @@ export function Features() {
                     <p className="text-xl text-light-surface-700 dark:text-dark-surface-300 mb-8">
                       {feature.description}
                     </p>
-                    
+
                     <div className="space-y-4">
                       {feature.benefits.map((benefit, idx) => (
                         <div key={idx} className="flex items-start gap-3">
@@ -252,7 +243,7 @@ export function Features() {
                         </div>
                       ))}
                     </div>
-                    
+
                     <div className="mt-8">
                       <button className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-brand-500 hover:bg-brand-600 text-white font-medium transition-colors">
                         Try this feature
@@ -260,7 +251,7 @@ export function Features() {
                       </button>
                     </div>
                   </div>
-                  
+
                   {/* Feature Visual */}
                   <div className="order-1 lg:order-2 flex justify-center">
                     <div className="relative">
@@ -292,9 +283,9 @@ export function Features() {
             </button>
           </div>
           <Accordion.Root type="single" collapsible className="space-y-4">
-            {features.map((feature, index) => (
-              <Accordion.Item 
-                key={feature.id} 
+            {features.map((feature) => (
+              <Accordion.Item
+                key={feature.id}
                 value={feature.id}
                 className="overflow-hidden rounded-xl border border-light-surface-200/50 dark:border-dark-surface-800/50 bg-light-surface-100/90 dark:bg-dark-surface-900/90 backdrop-blur-sm"
               >
@@ -316,7 +307,7 @@ export function Features() {
                     <p className="text-light-surface-700 dark:text-dark-surface-300 mb-4">
                       {feature.description}
                     </p>
-                    
+
                     <div className="space-y-2">
                       {feature.benefits.map((benefit, idx) => (
                         <div key={idx} className="flex items-start gap-2">

@@ -4,7 +4,6 @@ import { usePostHogUser } from '../hooks/usePostHogUser';
 import { Hero } from '../components/Hero';
 import { Features } from '../components/Features';
 import { About } from '../components/About';
-import { Testimonials } from '../components/Testimonials';
 import { Navbar } from '../components/ui/navbar';
 import { Footer } from '../components/ui/footer';
 
@@ -98,11 +97,6 @@ const LandingPage = () => {
         <div id="about">
           <About />
         </div>
-
-        {/* Testimonials Section */}
-        {/* <div id="testimonials">
-          <Testimonials />
-        </div> */}
 
         {/* Contact Section - Using id for navigation */}
         <div id="contact">

@@ -157,6 +157,8 @@ interface TwitchVideo {
     type: string;
 }
 
+
+//TODO: Seperate sections in to their own files with their own components
 const ContentSection = () => {
     const { getToken } = useAuth();
     const [videos, setVideos] = useState<TwitchVideo[]>([]);
@@ -169,53 +171,25 @@ const ContentSection = () => {
             setError(null);
             try {
                 // Get the API base URL based on environment
-                const apiBaseUrl = process.env.NODE_ENV === 'production' 
-                    ? 'https://api.creatorsync.app' 
+                const apiBaseUrl = process.env.NODE_ENV === 'production'
+                    ? 'https://api.creatorsync.app'
                     : 'http://localhost:8080';
-                
-                console.log('Environment:', process.env.NODE_ENV);
-                console.log('API Base URL:', apiBaseUrl);
-                
-                // Get authentication token from Clerk
-                let token;
-                try {
-                    token = await getToken();
-                    if (!token) {
-                        throw new Error("No token returned");
-                    }
-                } catch (tokenError) {
-                    console.error('Failed to get authentication token:', tokenError);
-                    throw new Error("Authentication failed: Unable to get valid token");
+
+                // Get the authentication token from Clerk - same approach that works locally
+                const token = await getToken();
+                if (!token) {
+                    throw new Error("User not authenticated or token not available.");
                 }
-                
-                // Validate token format
-                if (typeof token !== 'string' || token.trim() === '') {
-                    console.error('Invalid token format:', typeof token);
-                    throw new Error("Authentication failed: Invalid token format");
-                }
-                
-                // Debug token (safely)
-                console.log('Token type:', typeof token);
-                console.log('Token length:', token.length);
-                
-                // Format the token exactly as required by the API
-                // The API expects format: 'Bearer <token>'
-                // Make sure we don't add 'Bearer ' if it's already there
-                const formattedToken = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-                
-                console.log('Making API request to:', `${apiBaseUrl}/api/twitch/videos`);
-                
-                // Set up request with proper headers
+
+                // Make the API request with the same format that works locally
                 const requestOptions = {
                     method: 'GET',
                     headers: {
-                        'Authorization': formattedToken,
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    // Don't use credentials for now to eliminate that as a potential issue
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
                 };
-                
+
                 // Make the request
                 const response = await fetch(`${apiBaseUrl}/api/twitch/videos`, requestOptions);
                 if (!response.ok) {

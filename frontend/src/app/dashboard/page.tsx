@@ -174,7 +174,12 @@ const ContentSection = () => {
                 if (!token) {
                     throw new Error("User not authenticated or token not available.");
                 }
-                const response = await fetch('http://localhost:8080/api/twitch/videos', {
+                // Determine API base URL based on environment
+                const apiBaseUrl = process.env.NODE_ENV === 'production' 
+                    ? 'https://api.creatorsync.app' 
+                    : 'http://localhost:8080';
+                
+                const response = await fetch(`${apiBaseUrl}/api/twitch/videos`, {
                     headers: {
                         'Authorization': `Bearer ${token}`,
                     },

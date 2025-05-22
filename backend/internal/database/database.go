@@ -16,6 +16,8 @@ import (
 type Service interface {
 	Health() map[string]string
 	Close() error
+	GetDB() *sql.DB
+	RunMigrations() error
 }
 
 type service struct {
@@ -23,12 +25,6 @@ type service struct {
 }
 
 var (
-	database   = os.Getenv("POSTGRES_DB_DATABASE")
-	password   = os.Getenv("POSTGRES_DB_PASSWORD")
-	username   = os.Getenv("POSTGRES_DB_USERNAME")
-	port       = os.Getenv("POSTGRES_DB_PORT")
-	host       = os.Getenv("POSTGRES_DB_HOST")
-	schema     = os.Getenv("POSTGRES_DB_SCHEMA")
 	dbInstance *service
 )
 
@@ -36,11 +32,38 @@ func New() Service {
 	if dbInstance != nil {
 		return dbInstance
 	}
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&search_path=%s", username, password, host, port, database, schema)
+
+	var connStr string
+
+	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
+		connStr = databaseURL
+		log.Println("Using DATABASE_URL for connection")
+	} else {
+		database := os.Getenv("POSTGRES_DB_DATABASE")
+		password := os.Getenv("POSTGRES_DB_PASSWORD")
+		username := os.Getenv("POSTGRES_DB_USERNAME")
+		port := os.Getenv("POSTGRES_DB_PORT")
+		host := os.Getenv("POSTGRES_DB_HOST")
+		schema := os.Getenv("POSTGRES_DB_SCHEMA")
+
+		if schema == "" {
+			schema = "public"
+		}
+
+		connStr = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=require&search_path=%s",
+			username, password, host, port, database, schema)
+		log.Println("Using individual environment variables for connection")
+	}
+
 	db, err := sql.Open("pgx", connStr)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
 	dbInstance = &service{
 		db: db,
 	}
@@ -93,6 +116,15 @@ func (s *service) Health() map[string]string {
 }
 
 func (s *service) Close() error {
-	log.Printf("Disconnected from database: %s", database)
+	log.Printf("Disconnected from database")
 	return s.db.Close()
+}
+
+func (s *service) GetDB() *sql.DB {
+	return s.db
+}
+
+func (s *service) RunMigrations() error {
+	migrationRunner := NewMigrationRunner(s.db)
+	return migrationRunner.RunMigrations("migrations")
 }

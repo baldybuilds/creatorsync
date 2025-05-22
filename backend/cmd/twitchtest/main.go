@@ -96,10 +96,14 @@ func main() {
 
 	// Initialize the Twitch client
 	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
+	twitchClientSecret := os.Getenv("TWITCH_CLIENT_SECRET")
 	if twitchClientID == "" {
 		log.Fatalf("TWITCH_CLIENT_ID environment variable not set. This is required to run the twitchtest tool.")
 	}
-	twitchClient, err := twitch.NewClient(twitchClientID)
+	if twitchClientSecret == "" {
+		log.Fatalf("TWITCH_CLIENT_SECRET environment variable not set. This is required to run the twitchtest tool.")
+	}
+	twitchClient, err := twitch.NewClient(twitchClientID, twitchClientSecret)
 	if err != nil {
 		log.Fatalf("Failed to create Twitch client: %v", err)
 	}

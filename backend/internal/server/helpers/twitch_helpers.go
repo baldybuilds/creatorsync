@@ -6,9 +6,9 @@ import (
 	"log"
 	"os"
 
-	clerkSDK "github.com/clerk/clerk-sdk-go/v2"
 	"github.com/baldybuilds/creatorsync/internal/clerk"
 	"github.com/baldybuilds/creatorsync/internal/twitch"
+	clerkSDK "github.com/clerk/clerk-sdk-go/v2"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -53,12 +53,13 @@ func GetTwitchRequestContext(c *fiber.Ctx) (*TwitchRequestContext, error) {
 	}
 
 	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
-	if twitchClientID == "" {
-		log.Println("Error: TWITCH_CLIENT_ID environment variable not set.")
+	twitchClientSecret := os.Getenv("TWITCH_CLIENT_SECRET")
+	if twitchClientID == "" || twitchClientSecret == "" {
+		log.Println("Error: TWITCH_CLIENT_ID or TWITCH_CLIENT_SECRET environment variable not set.")
 		return nil, fmt.Errorf("twitch client configuration error")
 	}
 
-	initializedClient, clientErr := twitch.NewClient(twitchClientID)
+	initializedClient, clientErr := twitch.NewClient(twitchClientID, twitchClientSecret)
 	if clientErr != nil {
 		return nil, fmt.Errorf("failed to initialize Twitch client: %v", clientErr)
 	}
@@ -78,13 +79,13 @@ func GetTwitchRequestContext(c *fiber.Ctx) (*TwitchRequestContext, error) {
 func HandleTwitchError(c *fiber.Ctx, err error) error {
 	// Determine appropriate status code based on error message
 	statusCode := fiber.StatusInternalServerError
-	
+
 	if err.Error() == "user not authenticated" {
 		statusCode = fiber.StatusUnauthorized
 	} else if err.Error() == "twitch account not connected" {
 		statusCode = fiber.StatusBadRequest
 	}
-	
+
 	return c.Status(statusCode).JSON(fiber.Map{
 		"error": err.Error(),
 	})
@@ -94,9 +95,10 @@ func HandleTwitchError(c *fiber.Ctx, err error) error {
 // for handlers that don't need the full context
 func GetTwitchClient(ctx context.Context) (*twitch.Client, error) {
 	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
-	if twitchClientID == "" {
+	twitchClientSecret := os.Getenv("TWITCH_CLIENT_SECRET")
+	if twitchClientID == "" || twitchClientSecret == "" {
 		return nil, fmt.Errorf("twitch client configuration error")
 	}
 
-	return twitch.NewClient(twitchClientID)
+	return twitch.NewClient(twitchClientID, twitchClientSecret)
 }

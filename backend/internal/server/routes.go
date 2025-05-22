@@ -35,6 +35,9 @@ func (s *FiberServer) RegisterFiberRoutes() {
 	s.App.Get("/health", s.healthHandler)
 	s.App.Post("/api/waitlist", s.joinWaitlistHandler)
 
+	// Register Analytics routes (includes both public and protected routes)
+	s.registerAnalyticsRoutes()
+
 	// Protected routes group
 	api := s.App.Group("/api")
 	api.Use(clerk.AuthMiddleware())
@@ -131,7 +134,12 @@ func (s *FiberServer) registerTwitchRoutes(api fiber.Router) {
 	twitchGroup.Get("/channel", handlers.GetTwitchChannelHandler)
 	twitchGroup.Get("/streams", handlers.GetTwitchStreamsHandler)
 	twitchGroup.Get("/videos", handlers.GetTwitchVideosHandler)
+	twitchGroup.Get("/clips", handlers.GetTwitchClipsHandler)
 	twitchGroup.Get("/callback", handlers.TwitchCallbackHandler)
 	twitchGroup.Get("/subscribers", handlers.GetTwitchSubscribersHandler)
 	twitchGroup.Get("/analytics/video_summary", handlers.GetTwitchVideoAnalyticsSummaryHandler)
+}
+
+func (s *FiberServer) registerAnalyticsRoutes() {
+	s.analyticsHandlers.RegisterRoutes(s.App)
 }

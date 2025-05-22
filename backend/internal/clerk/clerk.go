@@ -58,7 +58,6 @@ func extractUserFromVerifyResult(result interface{}) User {
 		}
 	}
 
-	// If we couldn't extract user ID, log for debugging
 	if user.ID == "" {
 		fmt.Printf("Warning: Could not extract user ID from verify result: %+v\n", result)
 	}
@@ -95,10 +94,6 @@ func AuthMiddleware() fiber.Handler {
 		// Set the key for this request
 		clerk.SetKey(secretKey)
 
-		// Debug logging for production issues
-		fmt.Printf("CLERK_SECRET_KEY length: %d, starts with sk_: %t\n", 
-			len(secretKey), strings.HasPrefix(secretKey, "sk_"))
-
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -115,21 +110,12 @@ func AuthMiddleware() fiber.Handler {
 
 		token := parts[1]
 
-		// Log token info for debugging
-		fmt.Printf("Token received - Length: %d, JWT structure: %t\n",
-			len(token),
-			len(strings.Split(token, ".")) == 3)
-
 		// Always try manual JWT parsing first in production to avoid Clerk SDK issues
 		// This is more reliable for production deployment
 		user, err := parseJWTManually(token)
 		if err != nil {
-			fmt.Printf("Manual JWT parsing failed: %v\n", err)
-			// Fallback to Clerk SDK if manual parsing fails
 			return tryClerkVerification(c, token)
 		}
-
-		fmt.Printf("Successfully authenticated user: %s\n", user.ID)
 		c.Locals("user", *user)
 		return c.Next()
 	}
@@ -165,18 +151,12 @@ func decodeJWTSegment(seg string) ([]byte, error) {
 }
 
 func SyncUserData(ctx context.Context, userID string) error {
-	// This is a placeholder for database sync logic
-	// In a real implementation, you would:
-	// 1. Get the user from Clerk
-	// 2. Check if the user exists in your database
-	// 3. Create or update the user in your database
-
-	// For now, we'll just verify the user exists in Clerk
+	// TODO: Implement database sync logic - create/update user in database
 	_, err := GetUserByID(ctx, userID)
 	return err
 }
 
-// Parse JWT manually without Clerk SDK - more reliable for production
+// Parse JWT manually - more reliable for production than Clerk SDK
 func parseJWTManually(token string) (*User, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -228,16 +208,13 @@ func parseJWTManually(token string) (*User, error) {
 	return user, nil
 }
 
-// Fallback to Clerk SDK verification
 func tryClerkVerification(c *fiber.Ctx, token string) error {
-	fmt.Printf("Attempting Clerk SDK verification...\n")
-	
+
 	verifyResult, err := jwt.Verify(c.Context(), &jwt.VerifyParams{
 		Token: token,
 	})
-	
+
 	if err != nil {
-		fmt.Printf("Clerk SDK verification also failed: %v\n", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Token verification failed",
 		})
@@ -251,7 +228,6 @@ func tryClerkVerification(c *fiber.Ctx, token string) error {
 		})
 	}
 
-	fmt.Printf("Clerk SDK verification succeeded for user: %s\n", user.ID)
 	c.Locals("user", user)
 	return c.Next()
 }

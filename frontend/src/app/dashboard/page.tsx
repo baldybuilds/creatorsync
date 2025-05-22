@@ -178,12 +178,12 @@ const ContentSection = () => {
                 // Get the authentication token from Clerk
                 let token;
                 try {
-                    // Get a session token that will work with Clerk's verification in production
-                    // In production, use a custom template named 'custom-jwt'
-                    // In development, use the default token which works with your manual JWT parsing
-                    token = await getToken({
-                        template: process.env.NODE_ENV === 'production' ? 'jwt' : undefined
-                    });
+                    // Use the default session token without any custom template
+                    // This should work in both environments since we're handling the token format in the backend
+                    token = await getToken();
+                    
+                    // Log token information for debugging
+                    console.log('Using default token format');
 
                     if (!token) {
                         throw new Error("User not authenticated or token not available.");

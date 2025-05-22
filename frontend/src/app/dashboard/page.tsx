@@ -180,7 +180,7 @@ const ContentSection = () => {
                 try {
                     // Just use the standard getToken method without any templates
                     token = await getToken();
-                    
+
                     if (!token) {
                         throw new Error("User not authenticated or token not available.");
                     }
@@ -188,21 +188,21 @@ const ContentSection = () => {
                     console.error('Failed to get authentication token:', tokenError);
                     throw new Error("Authentication failed: Unable to get valid token");
                 }
-                
+
                 // Add detailed logging for production debugging
                 console.log('Environment:', process.env.NODE_ENV);
                 console.log('Token type:', typeof token);
                 console.log('Token length:', token.length);
                 console.log('Token first 10 chars:', token.substring(0, 10) + '...');
                 console.log('Token format check:', token.includes('.') ? 'Contains dots (likely JWT)' : 'No dots (not standard JWT)');
-                
+
                 // Try a different approach to format the authorization header
                 // The error suggests the backend is expecting a specific format
                 // Let's try without any space manipulation to ensure exact format
-                
+
                 // Format 1: Standard Bearer format
-                let authHeader = `Bearer ${token}`;
-                
+                const authHeader = `Bearer ${token}`;
+
                 // Log detailed debugging information in production
                 if (process.env.NODE_ENV === 'production') {
                     console.log('Production auth debugging:');
@@ -210,7 +210,7 @@ const ContentSection = () => {
                     console.log('- Auth header length:', authHeader.length);
                     console.log('- Token structure check:', token.split('.').length === 3 ? 'Valid JWT structure (3 parts)' : 'Not standard JWT structure');
                 }
-                
+
                 // Let's try a different approach for the API request
                 // Based on the error message, let's ensure the exact format expected by the backend
                 const requestOptions = {
@@ -222,7 +222,7 @@ const ContentSection = () => {
                         'Accept': 'application/json'
                     }
                 };
-                
+
                 // Log the exact request configuration in production
                 if (process.env.NODE_ENV === 'production') {
                     console.log('Request configuration:', {
@@ -243,7 +243,7 @@ const ContentSection = () => {
                         const errorData = await response.json();
                         // Log the full error response for debugging
                         console.error('Full API Error Response:', JSON.stringify(errorData));
-                        
+
                         // Create a more detailed error message
                         if (errorData) {
                             if (typeof errorData === 'string') {
@@ -253,10 +253,10 @@ const ContentSection = () => {
                             } else if (errorData.errors && errorData.errors.length > 0) {
                                 // Handle Clerk-specific error format
                                 const clerkErrors = errorData.errors;
-                                errorMessage = clerkErrors.map((err: { message?: string; code?: string; long_message?: string }) => 
+                                errorMessage = clerkErrors.map((err: { message?: string; code?: string; long_message?: string }) =>
                                     `${err.message || err.code}: ${err.long_message || ''}`
                                 ).join('; ');
-                                
+
                                 // If this is an authentication error, log additional details
                                 if (response.status === 401) {
                                     console.error('Authentication error detected. Token details:', {

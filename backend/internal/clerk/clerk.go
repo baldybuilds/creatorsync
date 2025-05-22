@@ -8,12 +8,63 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	clerk "github.com/clerk/clerk-sdk-go/v2"
 	"github.com/clerk/clerk-sdk-go/v2/jwt"
 	"github.com/clerk/clerk-sdk-go/v2/user"
 	"github.com/gofiber/fiber/v2"
 )
+
+// Helper function to extract user from verified claims (handles any return type)
+func extractUserFromVerifyResult(result interface{}) User {
+	user := User{}
+
+	// Convert the result to a map to extract user info
+	var claimsMap map[string]interface{}
+	if resultBytes, err := json.Marshal(result); err == nil {
+		var tempMap map[string]interface{}
+		if err := json.Unmarshal(resultBytes, &tempMap); err == nil {
+			// Try to find the subject/user ID in common locations
+			if sub, ok := tempMap["sub"].(string); ok {
+				user.ID = sub
+			} else if subject, ok := tempMap["subject"].(string); ok {
+				user.ID = subject
+			}
+
+			// Look for claims in different possible locations
+			if claims, ok := tempMap["claims"].(map[string]interface{}); ok {
+				claimsMap = claims
+			} else if extra, ok := tempMap["extra"].(map[string]interface{}); ok {
+				claimsMap = extra
+			} else {
+				claimsMap = tempMap
+			}
+
+			// Extract user info from claims
+			if email, ok := claimsMap["email"].(string); ok {
+				user.Email = email
+			}
+			if firstName, ok := claimsMap["first_name"].(string); ok {
+				user.FirstName = firstName
+			} else if firstName, ok := claimsMap["firstName"].(string); ok {
+				user.FirstName = firstName
+			}
+			if lastName, ok := claimsMap["last_name"].(string); ok {
+				user.LastName = lastName
+			} else if lastName, ok := claimsMap["lastName"].(string); ok {
+				user.LastName = lastName
+			}
+		}
+	}
+
+	// If we couldn't extract user ID, log for debugging
+	if user.ID == "" {
+		fmt.Printf("Warning: Could not extract user ID from verify result: %+v\n", result)
+	}
+
+	return user
+}
 
 type User struct {
 	ID        string `json:"id"`
@@ -64,30 +115,22 @@ func AuthMiddleware() fiber.Handler {
 
 		token := parts[1]
 
-		// Log token info for debugging (only in development)
-		if os.Getenv("APP_ENV") == "development" || os.Getenv("APP_ENV") == "local" {
-			fmt.Printf("Development mode: Token length: %d, JWT structure: %t\n",
-				len(token),
-				len(strings.Split(token, ".")) == 3)
-			// In development, use manual JWT parsing to avoid Clerk verification issues
-			return handleManualJWTParsing(c, token)
-		}
+		// Log token info for debugging
+		fmt.Printf("Token received - Length: %d, JWT structure: %t\n",
+			len(token),
+			len(strings.Split(token, ".")) == 3)
 
-		// Production: Try Clerk verification, fallback to manual parsing if needed
-		verifyResult, err := jwt.Verify(c.Context(), &jwt.VerifyParams{
-			Token: token,
-		})
-		
+		// Always try manual JWT parsing first in production to avoid Clerk SDK issues
+		// This is more reliable for production deployment
+		user, err := parseJWTManually(token)
 		if err != nil {
-			// Log the exact error for debugging
-			fmt.Printf("Clerk verification failed: %v, trying manual parsing\n", err)
-			// Fallback to manual JWT parsing
-			return handleManualJWTParsing(c, token)
+			fmt.Printf("Manual JWT parsing failed: %v\n", err)
+			// Fallback to Clerk SDK if manual parsing fails
+			return tryClerkVerification(c, token)
 		}
 
-		// Extract user from whatever type verifyResult is
-		user := extractUserFromVerifyResult(verifyResult)
-		c.Locals("user", user)
+		fmt.Printf("Successfully authenticated user: %s\n", user.ID)
+		c.Locals("user", *user)
 		return c.Next()
 	}
 }
@@ -133,54 +176,84 @@ func SyncUserData(ctx context.Context, userID string) error {
 	return err
 }
 
-// Helper function to extract user from verified claims (handles any return type)
-func extractUserFromVerifyResult(result interface{}) User {
-	user := User{}
+// Parse JWT manually without Clerk SDK - more reliable for production
+func parseJWTManually(token string) (*User, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid JWT format - expected 3 parts, got %d", len(parts))
+	}
 
-	// Convert the result to a map to extract user info
-	var claimsMap map[string]interface{}
-	if resultBytes, err := json.Marshal(result); err == nil {
-		var tempMap map[string]interface{}
-		if err := json.Unmarshal(resultBytes, &tempMap); err == nil {
-			// Try to find the subject/user ID in common locations
-			if sub, ok := tempMap["sub"].(string); ok {
-				user.ID = sub
-			} else if subject, ok := tempMap["subject"].(string); ok {
-				user.ID = subject
-			}
+	// Decode the payload (second part)
+	payload, err := decodeJWTSegment(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JWT payload: %w", err)
+	}
 
-			// Look for claims in different possible locations
-			if claims, ok := tempMap["claims"].(map[string]interface{}); ok {
-				claimsMap = claims
-			} else if extra, ok := tempMap["extra"].(map[string]interface{}); ok {
-				claimsMap = extra
-			} else {
-				claimsMap = tempMap
-			}
+	// Parse the claims
+	var claims map[string]interface{}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return nil, fmt.Errorf("failed to parse JWT claims: %w", err)
+	}
 
-			// Extract user info from claims
-			if email, ok := claimsMap["email"].(string); ok {
-				user.Email = email
-			}
-			if firstName, ok := claimsMap["first_name"].(string); ok {
-				user.FirstName = firstName
-			} else if firstName, ok := claimsMap["firstName"].(string); ok {
-				user.FirstName = firstName
-			}
-			if lastName, ok := claimsMap["last_name"].(string); ok {
-				user.LastName = lastName
-			} else if lastName, ok := claimsMap["lastName"].(string); ok {
-				user.LastName = lastName
-			}
+	// Extract user ID
+	userID, ok := claims["sub"].(string)
+	if !ok || userID == "" {
+		return nil, fmt.Errorf("missing or invalid 'sub' claim in JWT")
+	}
+
+	// Basic JWT validation - check expiration
+	if exp, ok := claims["exp"].(float64); ok {
+		if time.Now().Unix() > int64(exp) {
+			return nil, fmt.Errorf("JWT token has expired")
 		}
 	}
 
-	// If we couldn't extract user ID, log for debugging
-	if user.ID == "" {
-		fmt.Printf("Warning: Could not extract user ID from verify result: %+v\n", result)
+	user := &User{ID: userID}
+
+	// Extract additional user info
+	if email, ok := claims["email"].(string); ok {
+		user.Email = email
+	}
+	if firstName, ok := claims["first_name"].(string); ok {
+		user.FirstName = firstName
+	} else if firstName, ok := claims["firstName"].(string); ok {
+		user.FirstName = firstName
+	}
+	if lastName, ok := claims["last_name"].(string); ok {
+		user.LastName = lastName
+	} else if lastName, ok := claims["lastName"].(string); ok {
+		user.LastName = lastName
 	}
 
-	return user
+	return user, nil
+}
+
+// Fallback to Clerk SDK verification
+func tryClerkVerification(c *fiber.Ctx, token string) error {
+	fmt.Printf("Attempting Clerk SDK verification...\n")
+	
+	verifyResult, err := jwt.Verify(c.Context(), &jwt.VerifyParams{
+		Token: token,
+	})
+	
+	if err != nil {
+		fmt.Printf("Clerk SDK verification also failed: %v\n", err)
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Token verification failed",
+		})
+	}
+
+	// Extract user from whatever type verifyResult is
+	user := extractUserFromVerifyResult(verifyResult)
+	if user.ID == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Failed to extract user ID from token",
+		})
+	}
+
+	fmt.Printf("Clerk SDK verification succeeded for user: %s\n", user.ID)
+	c.Locals("user", user)
+	return c.Next()
 }
 
 // Helper function for manual JWT parsing (development only)

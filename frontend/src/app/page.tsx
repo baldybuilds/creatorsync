@@ -15,8 +15,12 @@ const LandingPage = () => {
 
   return (
     <>
-      <Script src="https://web.cmp.usercentrics.eu/modules/autoblocker.js"></Script>
-      <Script id="usercentrics-cmp" src="https://web.cmp.usercentrics.eu/ui/loader.js" data-settings-id="tI7hAkKpNfuyE-" async></Script>
+      {process.env.NODE_ENV === 'production' && (
+        <>
+          <Script src="https://web.cmp.usercentrics.eu/modules/autoblocker.js"></Script>
+          <Script id="usercentrics-cmp" src="https://web.cmp.usercentrics.eu/ui/loader.js" data-settings-id="tI7hAkKpNfuyE-" async></Script>
+        </>
+      )}
       <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-x-hidden relative">
         {/* Unified Background Elements */}
         <div className="fixed inset-0 overflow-hidden pointer-events-none">

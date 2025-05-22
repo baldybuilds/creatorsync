@@ -61,3 +61,30 @@ type TokenValidationResponse struct {
 	Scopes    []string `json:"scopes"`
 	ExpiresIn int      `json:"expires_in"`
 }
+
+// Subscription represents a Twitch subscriber.
+// See https://dev.twitch.tv/docs/api/reference/#get-broadcaster-subscriptions
+type Subscription struct {
+	BroadcasterID     string `json:"broadcaster_id"`
+	BroadcasterLogin  string `json:"broadcaster_login"`
+	BroadcasterName   string `json:"broadcaster_name"`
+	GifterID          string `json:"gifter_id,omitempty"`
+	GifterLogin       string `json:"gifter_login,omitempty"`
+	GifterName        string `json:"gifter_name,omitempty"`
+	IsGift            bool   `json:"is_gift"`
+	Tier              string `json:"tier"`
+	PlanName          string `json:"plan_name"`
+	UserID            string `json:"user_id"`
+	UserLogin         string `json:"user_login"`
+	UserName          string `json:"user_name"`
+}
+
+// SubscriptionsResponse represents the response from the Twitch Get Broadcaster Subscriptions endpoint.
+type SubscriptionsResponse struct {
+	Data       []Subscription `json:"data"`
+	Pagination struct {
+		Cursor string `json:"cursor"`
+	} `json:"pagination"`
+	Total      int `json:"total"`
+	Points     int `json:"points"` // Subscription points, if requested by scope
+}

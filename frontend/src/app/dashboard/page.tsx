@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { SignOutButton } from '@clerk/clerk-react';
+import { SignOutButton, useAuth } from '@clerk/nextjs';
 import { Button } from '../../components/ui/button';
 import { Users, BarChart2, Video, Calendar, LogOut, Settings as SettingsIcon, Sparkles, ArrowRight, Plus, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -144,7 +144,80 @@ const OverviewContent = () => (
     </div>
 );
 
-const ContentSection = () => (
+const ContentSection = () => {
+    const { getToken } = useAuth();
+    const [videos, setVideos] = useState<any[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchVideos = async () => {
+            setIsLoading(true);
+            setError(null);
+            try {
+                // Assuming Go backend is running on http://localhost:8080
+                // The frontend will call the /twitch/videos endpoint directly
+                const token = await getToken();
+                if (!token) {
+                    throw new Error("User not authenticated or token not available.");
+                }
+                const response = await fetch('http://localhost:8080/api/twitch/videos', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                    },
+                }); 
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                setVideos(data.videos || []);
+            } catch (e: any) {
+                console.error("Failed to fetch videos:", e);
+                setError(e.message || "Failed to load videos.");
+            }
+            setIsLoading(false);
+        };
+
+        fetchVideos();
+    }, []);
+
+    if (isLoading) {
+        return (
+            <div className="flex justify-center items-center h-64">
+                <p className="text-xl text-light-surface-700 dark:text-dark-surface-300">Loading content...</p>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="flex flex-col justify-center items-center h-64">
+                <p className="text-xl text-red-500">Error: {error}</p>
+                <Button onClick={() => { /* Consider adding a retry mechanism */ }} className="mt-4">Try Again</Button>
+            </div>
+        );
+    }
+
+    if (videos.length === 0) {
+        return (
+            <div className="flex flex-col justify-center items-center h-64">
+                 <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-500 text-sm mb-6 w-fit">
+                    <Video className="w-4 h-4" />
+                    <span>Content Library</span>
+                </div>
+                <h2 className="text-4xl font-bold mb-6">
+                    <span className="text-light-surface-900 dark:text-dark-surface-100">Your</span>{' '}
+                    <span className="bg-clip-text text-transparent bg-gradient-to-r from-purple-500 to-pink-500">Content</span>
+                </h2>
+                <p className="text-xl text-light-surface-700 dark:text-dark-surface-300 max-w-3xl mb-10 text-center">
+                    No videos found. Once you have some videos on Twitch, they'll appear here!
+                </p>
+            </div>
+        );
+    }
+
+    return (
     <div>
         <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-500 text-sm mb-6 w-fit">
             <Video className="w-4 h-4" />
@@ -173,23 +246,34 @@ const ContentSection = () => (
                 </Button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {[1, 2, 3].map((item) => (
-                    <div key={item} className="bg-light-surface-200/50 dark:bg-dark-surface-800/50 rounded-lg overflow-hidden group hover:border-purple-500/30 border border-transparent transition-all duration-300">
-                        <div className="aspect-video bg-light-surface-300/50 dark:bg-dark-surface-700/50 relative">
-                            <div className="absolute inset-0 flex items-center justify-center">
-                                <Play className="w-10 h-10 text-light-surface-500 dark:text-dark-surface-400 opacity-50 group-hover:opacity-100 transition-opacity" />
+                {videos.map((video: any) => (
+                    <div key={video.id} className="bg-light-surface-200/50 dark:bg-dark-surface-800/50 rounded-lg overflow-hidden group hover:border-purple-500/30 border border-transparent transition-all duration-300">
+                        <a href={video.url} target="_blank" rel="noopener noreferrer" className="block">
+                            <div className="aspect-video bg-light-surface-300/50 dark:bg-dark-surface-700/50 relative">
+                                {video.thumbnail_url && (
+                                    <img 
+                                        src={video.thumbnail_url.replace('%{width}', '480').replace('%{height}', '270')} 
+                                        alt={video.title} 
+                                        className="absolute inset-0 w-full h-full object-cover" 
+                                    />
+                                )}
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Play className="w-12 h-12 text-white" />
+                                </div>
                             </div>
-                        </div>
+                        </a>
                         <div className="p-4">
-                            <h4 className="font-medium text-light-surface-900 dark:text-dark-surface-100 mb-1">Epic Victory Royale</h4>
-                            <p className="text-sm text-light-surface-600 dark:text-dark-surface-400">2 days ago • 2:34</p>
+                            <h4 className="font-medium text-light-surface-900 dark:text-dark-surface-100 mb-1 truncate" title={video.title}>{video.title || 'Untitled Video'}</h4>
+                            <p className="text-sm text-light-surface-600 dark:text-dark-surface-400">{new Date(video.created_at).toLocaleDateString()} • {video.duration}</p>
+                            <p className="text-xs text-light-surface-500 dark:text-dark-surface-500">Views: {video.view_count}</p>
                         </div>
                     </div>
                 ))}
             </div>
         </motion.div>
     </div>
-);
+    );
+};
 
 const AnalyticsSection = () => (
     <div>

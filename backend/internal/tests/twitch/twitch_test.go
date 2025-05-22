@@ -74,15 +74,25 @@ func findProjectRoot() string {
 
 // TestNewClient tests the creation of a new Twitch client
 func TestNewClient(t *testing.T) {
-	client, err := twitch.NewClient()
-	assert.NoError(t, err, "NewClient should not return an error even without environment variables")
+	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
+	if twitchClientID == "" {
+		t.Log("TWITCH_CLIENT_ID not set, using placeholder for NewClient test")
+		twitchClientID = "test_placeholder_client_id" // Or skip, depending on test needs
+	}
+	client, err := twitch.NewClient(twitchClientID)
+	assert.NoError(t, err, "NewClient should not return an error")
 	assert.NotNil(t, client, "Client should not be nil")
 	t.Log("Client created successfully, will use Clerk for Twitch Auth")
 }
 
 // TestValidateToken tests the token validation functionality
 func TestValidateToken(t *testing.T) {
-	client, err := twitch.NewClient()
+	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
+	if twitchClientID == "" {
+		t.Log("TWITCH_CLIENT_ID not set, using placeholder for TestValidateToken")
+		twitchClientID = "test_placeholder_client_id"
+	}
+	client, err := twitch.NewClient(twitchClientID)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -158,7 +168,12 @@ func TestGetChannelInfo(t *testing.T) {
 		t.Skip("User does not have a connected Twitch account")
 	}
 
-	client, err := twitch.NewClient()
+	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
+	if twitchClientID == "" {
+		t.Log("TWITCH_CLIENT_ID not set, using placeholder") // Generic log message
+		twitchClientID = "test_placeholder_client_id"
+	}
+	client, err := twitch.NewClient(twitchClientID)
 	assert.NoError(t, err)
 
 	valid, err := client.ValidateToken(ctx, token)
@@ -216,7 +231,12 @@ func TestGetUserVideos(t *testing.T) {
 		t.Skip("User does not have a connected Twitch account")
 	}
 
-	client, err := twitch.NewClient()
+	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
+	if twitchClientID == "" {
+		t.Log("TWITCH_CLIENT_ID not set, using placeholder") // Generic log message
+		twitchClientID = "test_placeholder_client_id"
+	}
+	client, err := twitch.NewClient(twitchClientID)
 	assert.NoError(t, err)
 
 	valid, err := client.ValidateToken(ctx, token)

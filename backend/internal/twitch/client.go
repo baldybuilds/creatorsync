@@ -15,9 +15,9 @@ type Client struct {
 	httpClient *http.Client
 }
 
-func NewClient() (*Client, error) {
+func NewClient(clientID string) (*Client, error) {
 	return &Client{
-		clientID: "",
+		clientID: clientID,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},

@@ -6,6 +6,7 @@ import (
 
 	"github.com/baldybuilds/creatorsync/internal/clerk"
 	"github.com/baldybuilds/creatorsync/internal/email"
+	"github.com/baldybuilds/creatorsync/internal/server/handlers"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -125,4 +126,12 @@ func (s *FiberServer) getUserProfileHandler(c *fiber.Ctx) error {
 	})
 }
 
-// registerTwitchRoutes are implemented in twitch.go
+func (s *FiberServer) registerTwitchRoutes(api fiber.Router) {
+	twitchGroup := api.Group("/twitch")
+	twitchGroup.Get("/channel", handlers.GetTwitchChannelHandler)
+	twitchGroup.Get("/streams", handlers.GetTwitchStreamsHandler)
+	twitchGroup.Get("/videos", handlers.GetTwitchVideosHandler)
+	twitchGroup.Get("/callback", handlers.TwitchCallbackHandler)
+	twitchGroup.Get("/subscribers", handlers.GetTwitchSubscribersHandler)
+	twitchGroup.Get("/analytics/video_summary", handlers.GetTwitchVideoAnalyticsSummaryHandler)
+}

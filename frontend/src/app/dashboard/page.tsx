@@ -6,6 +6,7 @@ import { SignOutButton, useAuth } from '@clerk/nextjs';
 import { Button } from '../../components/ui/button';
 import { Users, BarChart2, Video, Calendar, LogOut, Settings as SettingsIcon, Sparkles, ArrowRight, Plus, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import Image from 'next/image';
 
 // Dashboard components with modern styling
 const OverviewContent = () => (
@@ -144,9 +145,21 @@ const OverviewContent = () => (
     </div>
 );
 
+// Define a proper type for Twitch videos
+interface TwitchVideo {
+    id: string;
+    title: string;
+    url: string;
+    thumbnail_url: string;
+    created_at: string;
+    duration: string;
+    view_count: number;
+    type: string;
+}
+
 const ContentSection = () => {
     const { getToken } = useAuth();
-    const [videos, setVideos] = useState<any[]>([]);
+    const [videos, setVideos] = useState<TwitchVideo[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -172,15 +185,16 @@ const ContentSection = () => {
                 }
                 const data = await response.json();
                 setVideos(data.videos || []);
-            } catch (e: any) {
+            } catch (e: unknown) {
                 console.error("Failed to fetch videos:", e);
-                setError(e.message || "Failed to load videos.");
+                const errorMessage = e instanceof Error ? e.message : "Failed to load videos.";
+                setError(errorMessage);
             }
             setIsLoading(false);
         };
 
         fetchVideos();
-    }, []);
+    }, [getToken]);
 
     if (isLoading) {
         return (
@@ -246,15 +260,17 @@ const ContentSection = () => {
                 </Button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {videos.map((video: any) => (
+                {videos.map((video) => (
                     <div key={video.id} className="bg-light-surface-200/50 dark:bg-dark-surface-800/50 rounded-lg overflow-hidden group hover:border-purple-500/30 border border-transparent transition-all duration-300">
                         <a href={video.url} target="_blank" rel="noopener noreferrer" className="block">
                             <div className="aspect-video bg-light-surface-300/50 dark:bg-dark-surface-700/50 relative">
                                 {video.thumbnail_url && (
-                                    <img 
+                                    <Image 
                                         src={video.thumbnail_url.replace('%{width}', '480').replace('%{height}', '270')} 
-                                        alt={video.title} 
-                                        className="absolute inset-0 w-full h-full object-cover" 
+                                        alt={video.title || 'Twitch video thumbnail'} 
+                                        className="object-cover" 
+                                        fill
+                                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                                     />
                                 )}
                                 <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">

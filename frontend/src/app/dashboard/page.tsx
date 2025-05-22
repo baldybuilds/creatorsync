@@ -175,22 +175,11 @@ const ContentSection = () => {
                     ? 'https://api.creatorsync.app'
                     : 'http://localhost:8080';
 
-                // Try a different approach for getting the token in production
+                // Use the simplest approach to get the token
                 let token;
                 try {
-                    // First try with the standard approach
+                    // Just use the standard getToken method without any templates
                     token = await getToken();
-                    
-                    // If we're in production, try to get a session token specifically
-                    if (process.env.NODE_ENV === 'production') {
-                        console.log('Using production token strategy');
-                        // Try to get a session token which might work better with your backend
-                        const sessionToken = await getToken({ template: 'default' });
-                        if (sessionToken) {
-                            token = sessionToken;
-                            console.log('Successfully obtained session token');
-                        }
-                    }
                     
                     if (!token) {
                         throw new Error("User not authenticated or token not available.");
@@ -209,8 +198,16 @@ const ContentSection = () => {
                 
                 // Create the authorization header with proper format
                 // Make sure the Bearer prefix has exactly one space after it
+                // In production, we'll log more details to help diagnose the issue
                 const authHeader = `Bearer ${token}`;
-                console.log('Auth header format:', authHeader.substring(0, 15) + '...');
+                
+                if (process.env.NODE_ENV === 'production') {
+                    console.log('Production auth debugging:');
+                    console.log('- Auth header starts with:', authHeader.substring(0, 15) + '...');
+                    console.log('- Auth header length:', authHeader.length);
+                    console.log('- Token structure check:', token.split('.').length === 3 ? 'Valid JWT structure (3 parts)' : 'Not standard JWT structure');
+                    // Don't log the actual token for security reasons
+                }
                 
                 // Make the API request with the same format that works locally
                 const requestOptions = {

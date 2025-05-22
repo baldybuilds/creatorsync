@@ -175,17 +175,48 @@ const ContentSection = () => {
                     ? 'https://api.creatorsync.app'
                     : 'http://localhost:8080';
 
-                // Get the authentication token from Clerk - same approach that works locally
-                const token = await getToken();
-                if (!token) {
-                    throw new Error("User not authenticated or token not available.");
+                // Try a different approach for getting the token in production
+                let token;
+                try {
+                    // First try with the standard approach
+                    token = await getToken();
+                    
+                    // If we're in production, try to get a session token specifically
+                    if (process.env.NODE_ENV === 'production') {
+                        console.log('Using production token strategy');
+                        // Try to get a session token which might work better with your backend
+                        const sessionToken = await getToken({ template: 'default' });
+                        if (sessionToken) {
+                            token = sessionToken;
+                            console.log('Successfully obtained session token');
+                        }
+                    }
+                    
+                    if (!token) {
+                        throw new Error("User not authenticated or token not available.");
+                    }
+                } catch (tokenError) {
+                    console.error('Failed to get authentication token:', tokenError);
+                    throw new Error("Authentication failed: Unable to get valid token");
                 }
-
+                
+                // Add detailed logging for production debugging
+                console.log('Environment:', process.env.NODE_ENV);
+                console.log('Token type:', typeof token);
+                console.log('Token length:', token.length);
+                console.log('Token first 10 chars:', token.substring(0, 10) + '...');
+                console.log('Token format check:', token.includes('.') ? 'Contains dots (likely JWT)' : 'No dots (not standard JWT)');
+                
+                // Create the authorization header with proper format
+                // Make sure the Bearer prefix has exactly one space after it
+                const authHeader = `Bearer ${token}`;
+                console.log('Auth header format:', authHeader.substring(0, 15) + '...');
+                
                 // Make the API request with the same format that works locally
                 const requestOptions = {
                     method: 'GET',
                     headers: {
-                        'Authorization': `Bearer ${token}`,
+                        'Authorization': authHeader,
                         'Content-Type': 'application/json'
                     }
                 };
@@ -196,14 +227,34 @@ const ContentSection = () => {
                     let errorMessage = `HTTP error! status: ${response.status}`;
                     try {
                         const errorData = await response.json();
+                        // Log the full error response for debugging
+                        console.error('Full API Error Response:', JSON.stringify(errorData));
+                        
                         // Create a more detailed error message
                         if (errorData) {
-                            errorMessage = typeof errorData === 'string' ? errorData :
-                                errorData.error ||
-                                (errorData.errors && errorData.errors.length > 0 ?
-                                    JSON.stringify(errorData.errors) : errorMessage);
+                            if (typeof errorData === 'string') {
+                                errorMessage = errorData;
+                            } else if (errorData.error) {
+                                errorMessage = errorData.error;
+                            } else if (errorData.errors && errorData.errors.length > 0) {
+                                // Handle Clerk-specific error format
+                                const clerkErrors = errorData.errors;
+                                errorMessage = clerkErrors.map((err: { message?: string; code?: string; long_message?: string }) => 
+                                    `${err.message || err.code}: ${err.long_message || ''}`
+                                ).join('; ');
+                                
+                                // If this is an authentication error, log additional details
+                                if (response.status === 401) {
+                                    console.error('Authentication error detected. Token details:', {
+                                        length: token.length,
+                                        format: token.includes('.') ? 'JWT format' : 'Not JWT format',
+                                        authHeader: authHeader.substring(0, 15) + '...'
+                                    });
+                                }
+                            } else {
+                                errorMessage = JSON.stringify(errorData);
+                            }
                         }
-                        console.error('API Error Response:', errorData);
                     } catch (jsonError) {
                         console.error('Failed to parse error response:', jsonError);
                     }

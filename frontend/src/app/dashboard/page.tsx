@@ -175,11 +175,15 @@ const ContentSection = () => {
                     ? 'https://api.creatorsync.app'
                     : 'http://localhost:8080';
 
-                // Use the simplest approach to get the token
+                // Get the authentication token from Clerk
                 let token;
                 try {
-                    // Just use the standard getToken method without any templates
-                    token = await getToken();
+                    // Get a session token that will work with Clerk's verification in production
+                    // In production, use a custom template named 'custom-jwt'
+                    // In development, use the default token which works with your manual JWT parsing
+                    token = await getToken({
+                        template: process.env.NODE_ENV === 'production' ? 'jwt' : undefined
+                    });
 
                     if (!token) {
                         throw new Error("User not authenticated or token not available.");

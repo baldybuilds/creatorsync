@@ -196,27 +196,44 @@ const ContentSection = () => {
                 console.log('Token first 10 chars:', token.substring(0, 10) + '...');
                 console.log('Token format check:', token.includes('.') ? 'Contains dots (likely JWT)' : 'No dots (not standard JWT)');
                 
-                // Create the authorization header with proper format
-                // Make sure the Bearer prefix has exactly one space after it
-                // In production, we'll log more details to help diagnose the issue
-                const authHeader = `Bearer ${token}`;
+                // Try a different approach to format the authorization header
+                // The error suggests the backend is expecting a specific format
+                // Let's try without any space manipulation to ensure exact format
                 
+                // Format 1: Standard Bearer format
+                let authHeader = `Bearer ${token}`;
+                
+                // Log detailed debugging information in production
                 if (process.env.NODE_ENV === 'production') {
                     console.log('Production auth debugging:');
-                    console.log('- Auth header starts with:', authHeader.substring(0, 15) + '...');
+                    console.log('- Auth header format:', 'Bearer [token]');
                     console.log('- Auth header length:', authHeader.length);
                     console.log('- Token structure check:', token.split('.').length === 3 ? 'Valid JWT structure (3 parts)' : 'Not standard JWT structure');
-                    // Don't log the actual token for security reasons
                 }
                 
-                // Make the API request with the same format that works locally
+                // Let's try a different approach for the API request
+                // Based on the error message, let's ensure the exact format expected by the backend
                 const requestOptions = {
                     method: 'GET',
                     headers: {
-                        'Authorization': authHeader,
-                        'Content-Type': 'application/json'
+                        // Format exactly as 'Bearer ' + token with no extra processing
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
                     }
                 };
+                
+                // Log the exact request configuration in production
+                if (process.env.NODE_ENV === 'production') {
+                    console.log('Request configuration:', {
+                        url: `${apiBaseUrl}/api/twitch/videos`,
+                        method: requestOptions.method,
+                        headers: {
+                            ...requestOptions.headers,
+                            'Authorization': 'Bearer [REDACTED]'
+                        }
+                    });
+                }
 
                 // Make the request
                 const response = await fetch(`${apiBaseUrl}/api/twitch/videos`, requestOptions);

@@ -183,27 +183,42 @@ const ContentSection = () => {
             setError(null);
 
             try {
-                // Get the API base URL based on environment
                 const apiBaseUrl = process.env.NODE_ENV === 'production'
                     ? 'https://api.creatorsync.app'
                     : 'http://localhost:8080';
 
-                // Get the default session token from Clerk
-                const token = await getToken();
+                // Get token with better error handling
+                let token;
+                try {
+                    token = await getToken();
+                } catch (tokenError: unknown) {
+                    console.error('Failed to get token:', tokenError);
+                    const errorMessage = tokenError instanceof Error ? tokenError.message : 'Unable to get token';
+                    throw new Error(`Authentication failed: ${errorMessage}`);
+                }
 
                 if (!token) {
                     throw new Error("Authentication failed: No token available");
                 }
 
-                // Log token info for debugging (only first 10 chars for security)
-                console.log('Token obtained:', {
-                    environment: process.env.NODE_ENV,
-                    tokenLength: token.length,
-                    tokenPrefix: token.substring(0, 10) + '...',
-                    hasJWTStructure: token.split('.').length === 3
-                });
+                // Enhanced debugging (only log in development or with minimal info in production)
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('Token Debug Info:', {
+                        tokenLength: token.length,
+                        tokenPrefix: token.substring(0, 20) + '...',
+                        hasJWTStructure: token.split('.').length === 3,
+                        isClerkToken: token.startsWith('sk_') || token.includes('.')
+                    });
+                } else {
+                    // Production: minimal logging
+                    console.log('Production token check:', {
+                        hasToken: !!token,
+                        tokenLength: token.length,
+                        isJWT: token.split('.').length === 3
+                    });
+                }
 
-                // Make the API request with proper headers
+                // Make the API request
                 const response = await fetch(`${apiBaseUrl}/api/twitch/videos`, {
                     method: 'GET',
                     headers: {
@@ -220,25 +235,39 @@ const ContentSection = () => {
                         const errorData = await response.json();
                         console.error('API Error Response:', errorData);
 
-                        // Handle different error response formats
+                        // Enhanced error parsing
                         if (typeof errorData === 'string') {
                             errorMessage = errorData;
                         } else if (errorData.error) {
                             errorMessage = errorData.error;
                         } else if (errorData.errors && Array.isArray(errorData.errors)) {
                             // Handle Clerk-specific error format
+                            interface ClerkError {
+                                long_message?: string;
+                                message?: string;
+                                code?: string;
+                                [key: string]: unknown;
+                            }
+                            
                             errorMessage = errorData.errors
-                                .map((err: { message?: string; code?: string; [key: string]: unknown }) => 
-                                    err.message || err.code || JSON.stringify(err)
-                                )
+                                .map((err: ClerkError) => {
+                                    if (err.long_message) return err.long_message;
+                                    if (err.message) return err.message;
+                                    if (err.code) return err.code;
+                                    return JSON.stringify(err);
+                                })
                                 .join('; ');
                         } else if (errorData.message) {
                             errorMessage = errorData.message;
                         }
 
-                        // Add context for authentication errors
+                        // Add specific guidance for common errors
                         if (response.status === 401) {
-                            errorMessage = `Authentication failed: ${errorMessage}`;
+                            if (errorMessage.includes('authorization_header_format_invalid')) {
+                                errorMessage = "Authentication failed: Token format invalid. Please try signing out and back in.";
+                            } else {
+                                errorMessage = `Authentication failed: ${errorMessage}`;
+                            }
                         }
                     } catch (parseError) {
                         console.error('Failed to parse error response:', parseError);

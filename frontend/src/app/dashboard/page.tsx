@@ -174,19 +174,41 @@ const ContentSection = () => {
                 if (!token) {
                     throw new Error("User not authenticated or token not available.");
                 }
+
                 // Determine API base URL based on environment
-                const apiBaseUrl = process.env.NODE_ENV === 'production' 
-                    ? 'https://api.creatorsync.app' 
+                const apiBaseUrl = process.env.NODE_ENV === 'production'
+                    ? 'https://api.creatorsync.app'
                     : 'http://localhost:8080';
-                
+
+                // Ensure token is properly formatted
+                // Remove any 'Bearer ' prefix if it already exists to avoid 'Bearer Bearer token'
+                const formattedToken = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+
+                console.log('Making API request to:', `${apiBaseUrl}/api/twitch/videos`);
+
                 const response = await fetch(`${apiBaseUrl}/api/twitch/videos`, {
                     headers: {
-                        'Authorization': `Bearer ${token}`,
+                        'Authorization': formattedToken,
+                        'Content-Type': 'application/json',
                     },
-                }); 
+                    credentials: 'include', // Include cookies if needed
+                });
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    let errorMessage = `HTTP error! status: ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        // Create a more detailed error message
+                        if (errorData) {
+                            errorMessage = typeof errorData === 'string' ? errorData :
+                                errorData.error ||
+                                (errorData.errors && errorData.errors.length > 0 ?
+                                    JSON.stringify(errorData.errors) : errorMessage);
+                        }
+                        console.error('API Error Response:', errorData);
+                    } catch (jsonError) {
+                        console.error('Failed to parse error response:', jsonError);
+                    }
+                    throw new Error(errorMessage);
                 }
                 const data = await response.json();
                 setVideos(data.videos || []);
@@ -221,7 +243,7 @@ const ContentSection = () => {
     if (videos.length === 0) {
         return (
             <div className="flex flex-col justify-center items-center h-64">
-                 <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-500 text-sm mb-6 w-fit">
+                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-500 text-sm mb-6 w-fit">
                     <Video className="w-4 h-4" />
                     <span>Content Library</span>
                 </div>
@@ -237,62 +259,62 @@ const ContentSection = () => {
     }
 
     return (
-    <div>
-        <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-500 text-sm mb-6 w-fit">
-            <Video className="w-4 h-4" />
-            <span>Content Library</span>
-        </div>
-
-        <h2 className="text-4xl font-bold mb-6">
-            <span className="text-light-surface-900 dark:text-dark-surface-100">Your</span>{' '}
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-purple-500 to-pink-500">Content</span>
-        </h2>
-
-        <p className="text-xl text-light-surface-700 dark:text-dark-surface-300 max-w-3xl mb-10">
-            Manage your VODs, highlights, and clips all in one place.
-        </p>
-
-        <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ duration: 0.4 }}
-            className="bg-light-surface-100/90 dark:bg-dark-surface-900/90 backdrop-blur-sm p-8 rounded-xl shadow-md border border-light-surface-200/50 dark:border-dark-surface-800/50 mb-8"
-        >
-            <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-bold text-light-surface-900 dark:text-dark-surface-100">Recent Clips</h3>
-                <Button variant="outline" size="sm">
-                    View All
-                </Button>
+        <div>
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-500 text-sm mb-6 w-fit">
+                <Video className="w-4 h-4" />
+                <span>Content Library</span>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {videos.map((video) => (
-                    <div key={video.id} className="bg-light-surface-200/50 dark:bg-dark-surface-800/50 rounded-lg overflow-hidden group hover:border-purple-500/30 border border-transparent transition-all duration-300">
-                        <a href={video.url} target="_blank" rel="noopener noreferrer" className="block">
-                            <div className="aspect-video bg-light-surface-300/50 dark:bg-dark-surface-700/50 relative">
-                                {video.thumbnail_url && (
-                                    <Image 
-                                        src={video.thumbnail_url.replace('%{width}', '480').replace('%{height}', '270')} 
-                                        alt={video.title || 'Twitch video thumbnail'} 
-                                        className="object-cover" 
-                                        fill
-                                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                                    />
-                                )}
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Play className="w-12 h-12 text-white" />
+
+            <h2 className="text-4xl font-bold mb-6">
+                <span className="text-light-surface-900 dark:text-dark-surface-100">Your</span>{' '}
+                <span className="bg-clip-text text-transparent bg-gradient-to-r from-purple-500 to-pink-500">Content</span>
+            </h2>
+
+            <p className="text-xl text-light-surface-700 dark:text-dark-surface-300 max-w-3xl mb-10">
+                Manage your VODs, highlights, and clips all in one place.
+            </p>
+
+            <motion.div
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ duration: 0.4 }}
+                className="bg-light-surface-100/90 dark:bg-dark-surface-900/90 backdrop-blur-sm p-8 rounded-xl shadow-md border border-light-surface-200/50 dark:border-dark-surface-800/50 mb-8"
+            >
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold text-light-surface-900 dark:text-dark-surface-100">Recent Clips</h3>
+                    <Button variant="outline" size="sm">
+                        View All
+                    </Button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {videos.map((video) => (
+                        <div key={video.id} className="bg-light-surface-200/50 dark:bg-dark-surface-800/50 rounded-lg overflow-hidden group hover:border-purple-500/30 border border-transparent transition-all duration-300">
+                            <a href={video.url} target="_blank" rel="noopener noreferrer" className="block">
+                                <div className="aspect-video bg-light-surface-300/50 dark:bg-dark-surface-700/50 relative">
+                                    {video.thumbnail_url && (
+                                        <Image
+                                            src={video.thumbnail_url.replace('%{width}', '480').replace('%{height}', '270')}
+                                            alt={video.title || 'Twitch video thumbnail'}
+                                            className="object-cover"
+                                            fill
+                                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                                        />
+                                    )}
+                                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Play className="w-12 h-12 text-white" />
+                                    </div>
                                 </div>
+                            </a>
+                            <div className="p-4">
+                                <h4 className="font-medium text-light-surface-900 dark:text-dark-surface-100 mb-1 truncate" title={video.title}>{video.title || 'Untitled Video'}</h4>
+                                <p className="text-sm text-light-surface-600 dark:text-dark-surface-400">{new Date(video.created_at).toLocaleDateString()} • {video.duration}</p>
+                                <p className="text-xs text-light-surface-500 dark:text-dark-surface-500">Views: {video.view_count}</p>
                             </div>
-                        </a>
-                        <div className="p-4">
-                            <h4 className="font-medium text-light-surface-900 dark:text-dark-surface-100 mb-1 truncate" title={video.title}>{video.title || 'Untitled Video'}</h4>
-                            <p className="text-sm text-light-surface-600 dark:text-dark-surface-400">{new Date(video.created_at).toLocaleDateString()} • {video.duration}</p>
-                            <p className="text-xs text-light-surface-500 dark:text-dark-surface-500">Views: {video.view_count}</p>
                         </div>
-                    </div>
-                ))}
-            </div>
-        </motion.div>
-    </div>
+                    ))}
+                </div>
+            </motion.div>
+        </div>
     );
 };
 

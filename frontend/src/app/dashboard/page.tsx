@@ -191,7 +191,7 @@ const ContentSection = () => {
                         'Authorization': formattedToken,
                         'Content-Type': 'application/json',
                     },
-                    credentials: 'include', // Include cookies if needed
+                    credentials: 'include', // Include cookies for proper authentication
                 });
                 if (!response.ok) {
                     let errorMessage = `HTTP error! status: ${response.status}`;

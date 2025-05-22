@@ -26,7 +26,7 @@ func (s *FiberServer) RegisterFiberRoutes() {
 		AllowOrigins:     allowedOrigins,
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
 		AllowHeaders:     "Accept,Authorization,Content-Type",
-		AllowCredentials: false,
+		AllowCredentials: true, // Enable credentials support for cross-origin requests
 		MaxAge:           300,
 	}))
 

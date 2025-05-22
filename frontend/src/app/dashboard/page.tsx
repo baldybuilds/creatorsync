@@ -228,7 +228,9 @@ const ContentSection = () => {
                         } else if (errorData.errors && Array.isArray(errorData.errors)) {
                             // Handle Clerk-specific error format
                             errorMessage = errorData.errors
-                                .map((err: any) => err.message || err.code || JSON.stringify(err))
+                                .map((err: { message?: string; code?: string; [key: string]: unknown }) => 
+                                    err.message || err.code || JSON.stringify(err)
+                                )
                                 .join('; ');
                         } else if (errorData.message) {
                             errorMessage = errorData.message;

@@ -160,140 +160,139 @@ interface TwitchVideo {
 
 //TODO: Seperate sections in to their own files with their own components
 const ContentSection = () => {
-    const { getToken } = useAuth();
+    const { getToken, isLoaded, isSignedIn } = useAuth();
     const [videos, setVideos] = useState<TwitchVideo[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchVideos = async () => {
+            // Wait for Clerk to fully load
+            if (!isLoaded) {
+                return;
+            }
+
+            // Check if user is signed in
+            if (!isSignedIn) {
+                setError("Please sign in to view your content");
+                setIsLoading(false);
+                return;
+            }
+
             setIsLoading(true);
             setError(null);
+
             try {
                 // Get the API base URL based on environment
                 const apiBaseUrl = process.env.NODE_ENV === 'production'
                     ? 'https://api.creatorsync.app'
                     : 'http://localhost:8080';
 
-                // Get the authentication token from Clerk
-                let token;
-                try {
-                    // Use the default session token without any custom template
-                    // This should work in both environments since we're handling the token format in the backend
-                    token = await getToken();
-                    
-                    // Log token information for debugging
-                    console.log('Using default token format');
+                // Get the default session token from Clerk
+                const token = await getToken();
 
-                    if (!token) {
-                        throw new Error("User not authenticated or token not available.");
-                    }
-                } catch (tokenError) {
-                    console.error('Failed to get authentication token:', tokenError);
-                    throw new Error("Authentication failed: Unable to get valid token");
+                if (!token) {
+                    throw new Error("Authentication failed: No token available");
                 }
 
-                // Add detailed logging for production debugging
-                console.log('Environment:', process.env.NODE_ENV);
-                console.log('Token type:', typeof token);
-                console.log('Token length:', token.length);
-                console.log('Token first 10 chars:', token.substring(0, 10) + '...');
-                console.log('Token format check:', token.includes('.') ? 'Contains dots (likely JWT)' : 'No dots (not standard JWT)');
+                // Log token info for debugging (only first 10 chars for security)
+                console.log('Token obtained:', {
+                    environment: process.env.NODE_ENV,
+                    tokenLength: token.length,
+                    tokenPrefix: token.substring(0, 10) + '...',
+                    hasJWTStructure: token.split('.').length === 3
+                });
 
-                // Try a different approach to format the authorization header
-                // The error suggests the backend is expecting a specific format
-                // Let's try without any space manipulation to ensure exact format
-
-                // Format 1: Standard Bearer format
-                const authHeader = `Bearer ${token}`;
-
-                // Log detailed debugging information in production
-                if (process.env.NODE_ENV === 'production') {
-                    console.log('Production auth debugging:');
-                    console.log('- Auth header format:', 'Bearer [token]');
-                    console.log('- Auth header length:', authHeader.length);
-                    console.log('- Token structure check:', token.split('.').length === 3 ? 'Valid JWT structure (3 parts)' : 'Not standard JWT structure');
-                }
-
-                // Let's try a different approach for the API request
-                // Based on the error message, let's ensure the exact format expected by the backend
-                const requestOptions = {
+                // Make the API request with proper headers
+                const response = await fetch(`${apiBaseUrl}/api/twitch/videos`, {
                     method: 'GET',
                     headers: {
-                        // Format exactly as 'Bearer ' + token with no extra processing
-                        'Authorization': 'Bearer ' + token,
+                        'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     }
-                };
+                });
 
-                // Log the exact request configuration in production
-                if (process.env.NODE_ENV === 'production') {
-                    console.log('Request configuration:', {
-                        url: `${apiBaseUrl}/api/twitch/videos`,
-                        method: requestOptions.method,
-                        headers: {
-                            ...requestOptions.headers,
-                            'Authorization': 'Bearer [REDACTED]'
-                        }
-                    });
-                }
-
-                // Make the request
-                const response = await fetch(`${apiBaseUrl}/api/twitch/videos`, requestOptions);
                 if (!response.ok) {
-                    let errorMessage = `HTTP error! status: ${response.status}`;
+                    let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+
                     try {
                         const errorData = await response.json();
-                        // Log the full error response for debugging
-                        console.error('Full API Error Response:', JSON.stringify(errorData));
+                        console.error('API Error Response:', errorData);
 
-                        // Create a more detailed error message
-                        if (errorData) {
-                            if (typeof errorData === 'string') {
-                                errorMessage = errorData;
-                            } else if (errorData.error) {
-                                errorMessage = errorData.error;
-                            } else if (errorData.errors && errorData.errors.length > 0) {
-                                // Handle Clerk-specific error format
-                                const clerkErrors = errorData.errors;
-                                errorMessage = clerkErrors.map((err: { message?: string; code?: string; long_message?: string }) =>
-                                    `${err.message || err.code}: ${err.long_message || ''}`
-                                ).join('; ');
-
-                                // If this is an authentication error, log additional details
-                                if (response.status === 401) {
-                                    console.error('Authentication error detected. Token details:', {
-                                        length: token.length,
-                                        format: token.includes('.') ? 'JWT format' : 'Not JWT format',
-                                        authHeader: authHeader.substring(0, 15) + '...'
-                                    });
-                                }
-                            } else {
-                                errorMessage = JSON.stringify(errorData);
-                            }
+                        // Handle different error response formats
+                        if (typeof errorData === 'string') {
+                            errorMessage = errorData;
+                        } else if (errorData.error) {
+                            errorMessage = errorData.error;
+                        } else if (errorData.errors && Array.isArray(errorData.errors)) {
+                            // Handle Clerk-specific error format
+                            errorMessage = errorData.errors
+                                .map((err: any) => err.message || err.code || JSON.stringify(err))
+                                .join('; ');
+                        } else if (errorData.message) {
+                            errorMessage = errorData.message;
                         }
-                    } catch (jsonError) {
-                        console.error('Failed to parse error response:', jsonError);
+
+                        // Add context for authentication errors
+                        if (response.status === 401) {
+                            errorMessage = `Authentication failed: ${errorMessage}`;
+                        }
+                    } catch (parseError) {
+                        console.error('Failed to parse error response:', parseError);
+                        errorMessage = `${errorMessage} (Could not parse error details)`;
                     }
+
                     throw new Error(errorMessage);
                 }
+
                 const data = await response.json();
                 setVideos(data.videos || []);
+
             } catch (e: unknown) {
                 console.error("Failed to fetch videos:", e);
-                const errorMessage = e instanceof Error ? e.message : "Failed to load videos.";
+                const errorMessage = e instanceof Error ? e.message : "Failed to load videos";
                 setError(errorMessage);
+            } finally {
+                setIsLoading(false);
             }
-            setIsLoading(false);
         };
 
         fetchVideos();
-    }, [getToken]);
+    }, [getToken, isLoaded, isSignedIn]);
+
+    // Show loading while Clerk is initializing
+    if (!isLoaded) {
+        return (
+            <div className="flex justify-center items-center h-64">
+                <p className="text-xl text-light-surface-700 dark:text-dark-surface-300">Initializing...</p>
+            </div>
+        );
+    }
+
+    // Show sign-in prompt if not authenticated
+    if (!isSignedIn) {
+        return (
+            <div className="flex flex-col justify-center items-center h-64">
+                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/20 border border-red-500/30 text-red-500 text-sm mb-6 w-fit">
+                    <Video className="w-4 h-4" />
+                    <span>Authentication Required</span>
+                </div>
+                <h2 className="text-4xl font-bold mb-6">
+                    <span className="text-light-surface-900 dark:text-dark-surface-100">Please</span>{' '}
+                    <span className="bg-clip-text text-transparent bg-gradient-to-r from-red-500 to-pink-500">Sign In</span>
+                </h2>
+                <p className="text-xl text-light-surface-700 dark:text-dark-surface-300 max-w-3xl mb-10 text-center">
+                    You need to be signed in to view your content.
+                </p>
+            </div>
+        );
+    }
 
     if (isLoading) {
         return (
             <div className="flex justify-center items-center h-64">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500 mr-3"></div>
                 <p className="text-xl text-light-surface-700 dark:text-dark-surface-300">Loading content...</p>
             </div>
         );
@@ -302,8 +301,23 @@ const ContentSection = () => {
     if (error) {
         return (
             <div className="flex flex-col justify-center items-center h-64">
-                <p className="text-xl text-red-500">Error: {error}</p>
-                <Button onClick={() => { /* Consider adding a retry mechanism */ }} className="mt-4">Try Again</Button>
+                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/20 border border-red-500/30 text-red-500 text-sm mb-6 w-fit">
+                    <Video className="w-4 h-4" />
+                    <span>Error Loading Content</span>
+                </div>
+                <h2 className="text-2xl font-bold mb-4 text-red-500">
+                    Something went wrong
+                </h2>
+                <p className="text-lg text-light-surface-700 dark:text-dark-surface-300 mb-4 text-center max-w-2xl">
+                    {error}
+                </p>
+                <Button
+                    onClick={() => window.location.reload()}
+                    className="mt-4"
+                    variant="outline"
+                >
+                    Try Again
+                </Button>
             </div>
         );
     }
@@ -326,6 +340,7 @@ const ContentSection = () => {
         );
     }
 
+    // Rest of your existing component code for displaying videos...
     return (
         <div>
             <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-500 text-sm mb-6 w-fit">

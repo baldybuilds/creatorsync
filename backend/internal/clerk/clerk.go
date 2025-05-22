@@ -49,11 +49,19 @@ func AuthMiddleware() fiber.Handler {
 
 		token := parts[1]
 
+		// Log token info for debugging (only in development)
 		if os.Getenv("APP_ENV") == "development" || os.Getenv("APP_ENV") == "local" {
+			fmt.Printf("Development mode: Token length: %d, JWT structure: %t\n",
+				len(token),
+				len(strings.Split(token, ".")) == 3)
+		}
+
+		if os.Getenv("APP_ENV") == "development" || os.Getenv("APP_ENV") == "local" {
+			// Development environment: Manual JWT parsing with relaxed validation
 			parts := strings.Split(token, ".")
 			if len(parts) != 3 {
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-					"error": "Invalid token format",
+					"error": "Invalid token format - expected JWT with 3 parts",
 				})
 			}
 
@@ -78,19 +86,17 @@ func AuthMiddleware() fiber.Handler {
 				})
 			}
 
-			user := User{
-				ID: userID,
-			}
+			user := User{ID: userID}
+
+			// Extract user info from claims
 			if email, ok := claims["email"].(string); ok {
 				user.Email = email
 			}
-
 			if firstName, ok := claims["first_name"].(string); ok {
 				user.FirstName = firstName
 			} else if firstName, ok := claims["firstName"].(string); ok {
 				user.FirstName = firstName
 			}
-
 			if lastName, ok := claims["last_name"].(string); ok {
 				user.LastName = lastName
 			} else if lastName, ok := claims["lastName"].(string); ok {
@@ -98,51 +104,50 @@ func AuthMiddleware() fiber.Handler {
 			}
 
 			c.Locals("user", user)
-
 			return c.Next()
 		}
 
+		// Production environment: Use Clerk SDK for strict validation
 		sessionClaims, err := jwt.Verify(c.Context(), &jwt.VerifyParams{
 			Token: token,
 		})
 		if err != nil {
+			// Provide more detailed error information
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": fmt.Sprintf("Invalid token: %v", err),
+				"error": fmt.Sprintf("Token verification failed: %v", err),
 			})
 		}
 
 		userID := sessionClaims.Subject
 		if userID == "" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid user ID in token",
+				"error": "Invalid user ID in token claims",
 			})
 		}
 
-		user := User{
-			ID: userID,
-		}
+		user := User{ID: userID}
+
+		// Extract user info from verified claims
 		var claimsMap map[string]interface{}
-		claimsBytes, _ := json.Marshal(sessionClaims.Claims)
-		json.Unmarshal(claimsBytes, &claimsMap)
+		if claimsBytes, err := json.Marshal(sessionClaims.Claims); err == nil {
+			json.Unmarshal(claimsBytes, &claimsMap)
 
-		if email, ok := claimsMap["email"].(string); ok {
-			user.Email = email
-		}
-
-		if firstName, ok := claimsMap["first_name"].(string); ok {
-			user.FirstName = firstName
-		} else if firstName, ok := claimsMap["firstName"].(string); ok {
-			user.FirstName = firstName
-		}
-
-		if lastName, ok := claimsMap["last_name"].(string); ok {
-			user.LastName = lastName
-		} else if lastName, ok := claimsMap["lastName"].(string); ok {
-			user.LastName = lastName
+			if email, ok := claimsMap["email"].(string); ok {
+				user.Email = email
+			}
+			if firstName, ok := claimsMap["first_name"].(string); ok {
+				user.FirstName = firstName
+			} else if firstName, ok := claimsMap["firstName"].(string); ok {
+				user.FirstName = firstName
+			}
+			if lastName, ok := claimsMap["last_name"].(string); ok {
+				user.LastName = lastName
+			} else if lastName, ok := claimsMap["lastName"].(string); ok {
+				user.LastName = lastName
+			}
 		}
 
 		c.Locals("user", user)
-
 		return c.Next()
 	}
 }

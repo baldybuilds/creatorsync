@@ -210,49 +210,16 @@ func (dc *dataCollector) ensureUserExists(ctx context.Context, userID string) er
 		return nil // User already exists
 	}
 
-	// Try to get user's Twitch OAuth token to fetch profile info
+	// Get user's Twitch OAuth token to fetch profile info
 	twitchToken, err := clerk.GetOAuthToken(ctx, userID, "oauth_twitch")
 	if err != nil {
-		// If we can't get OAuth token (likely cross-environment user), create basic record
-		log.Printf("⚠️ Cannot get Twitch token for user %s (likely cross-environment), creating basic user record: %v", userID, err)
-		
-		// Create minimal user record with just the Clerk ID
-		user := &User{
-			ID:          userID,
-			ClerkUserID: userID,
-			Username:    fmt.Sprintf("user_%s", userID[5:15]), // Create a basic username from ID
-			DisplayName: "Unknown User",
-			Email:       "",
-		}
-
-		if err := dc.repo.CreateOrUpdateUser(ctx, user); err != nil {
-			return fmt.Errorf("failed to create basic user record: %w", err)
-		}
-
-		log.Printf("✅ Created basic user record for cross-environment user %s", userID)
-		return nil
+		return fmt.Errorf("failed to get Twitch token for user %s: %w", userID, err)
 	}
 
 	// Fetch user info from Twitch
 	userInfo, err := dc.twitchClient.GetUserInfo(twitchToken)
 	if err != nil {
-		// If Twitch API fails, still create a basic record
-		log.Printf("⚠️ Failed to get user info from Twitch for %s, creating basic record: %v", userID, err)
-		
-		user := &User{
-			ID:          userID,
-			ClerkUserID: userID,
-			Username:    fmt.Sprintf("user_%s", userID[5:15]),
-			DisplayName: "Unknown User",
-			Email:       "",
-		}
-
-		if err := dc.repo.CreateOrUpdateUser(ctx, user); err != nil {
-			return fmt.Errorf("failed to create basic user record: %w", err)
-		}
-
-		log.Printf("✅ Created basic user record for user %s", userID)
-		return nil
+		return fmt.Errorf("failed to get user info from Twitch for %s: %w", userID, err)
 	}
 
 	// Create user record with Twitch info

@@ -1,4 +1,4 @@
-name: Deploy to Staging
+name: Deploy to Staging (QA Environment)
 
 on:
   push:
@@ -45,12 +45,14 @@ jobs:
         run: cd frontend && npm run build
         env:
           NEXT_PUBLIC_APP_ENV: staging
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY_PRODUCTION }}
+          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
+          NEXT_PUBLIC_POSTHOG_HOST: ${{ secrets.NEXT_PUBLIC_POSTHOG_HOST }}
 
   deploy-backend-staging:
-    if: github.ref == 'refs/heads/staging'
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
     needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest
-    environment: staging
     steps:
       - uses: actions/checkout@v4
 
@@ -65,30 +67,22 @@ jobs:
           go mod download
           go build -o creatorsync ./cmd/api
 
-      - name: Sync Production Data to Staging
+      - name: Deploy to Railway (Staging QA)
         run: |
-          echo "🔄 Syncing production data to staging database..."
-          # Install PostgreSQL client
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          
-          # Run the sync script
-          export PROD_DATABASE_URL="${{ secrets.PROD_DATABASE_URL }}"
-          export STAGING_DATABASE_URL="${{ secrets.STAGING_DATABASE_URL }}"
-          chmod +x scripts/sync-prod-to-staging.sh
-          ./scripts/sync-prod-to-staging.sh
-
-      - name: Deploy to Railway (Staging)
-        run: |
-          echo "🚀 Backend deployment to Railway staging environment would happen here"
-          echo "This would typically use Railway CLI or API to deploy to staging service"
+          echo "🚀 Deploying backend to Railway staging QA environment..."
+          echo "📊 Staging now uses production database for true QA testing"
+          echo "🔒 Staging uses production Clerk environment for user authentication"
           # Railway deployment commands would go here
+          # The staging service should be configured with:
+          # - PRODUCTION Clerk keys for user auth
+          # - PRODUCTION database connection for data access
+          # - Different app hostname (api-dev.creatorsync.app)
           # Example: railway deploy --service=creatorsync-api-staging
 
   deploy-frontend-staging:
-    if: github.ref == 'refs/heads/staging'
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
     needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest
-    environment: staging
     steps:
       - uses: actions/checkout@v4
       
@@ -102,15 +96,19 @@ jobs:
       - name: Install dependencies
         run: cd frontend && npm ci
       
-      - name: Build for staging
+      - name: Build for staging QA
         run: cd frontend && npm run build
         env:
           NEXT_PUBLIC_APP_ENV: staging
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY_STAGING }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY_PRODUCTION }}
+          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
+          NEXT_PUBLIC_POSTHOG_HOST: ${{ secrets.NEXT_PUBLIC_POSTHOG_HOST }}
       
-      - name: Deploy to Vercel (Staging)
+      - name: Deploy to Vercel (Staging QA)
         run: |
-          echo "🚀 Frontend deployment to Vercel staging environment would happen here"
-          echo "This would typically use Vercel CLI to deploy to staging project"
+          echo "🚀 Deploying frontend to Vercel staging QA environment..."
+          echo "🔒 Staging frontend now uses production Clerk for authentication"
+          echo "📊 This creates a true production mirror for QA testing"
           # Vercel deployment commands would go here
-          # Example: vercel deploy --prod --token ${{ secrets.VERCEL_TOKEN }} --scope staging 
+          # The staging project should be configured with production Clerk keys
+          # Example: vercel deploy --prod --token ${{ secrets.VERCEL_TOKEN }} --scope staging

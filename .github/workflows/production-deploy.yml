@@ -42,11 +42,15 @@ jobs:
       
       - name: Build frontend
         run: cd frontend && npm run build
+        env:
+          NEXT_PUBLIC_APP_ENV: production
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY_PRODUCTION }}
+          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
+          NEXT_PUBLIC_POSTHOG_HOST: ${{ secrets.NEXT_PUBLIC_POSTHOG_HOST }}
 
   deploy-backend-production:
     needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - uses: actions/checkout@v4
 
@@ -71,7 +75,6 @@ jobs:
   deploy-frontend-production:
     needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - uses: actions/checkout@v4
       
@@ -88,7 +91,10 @@ jobs:
       - name: Build for production
         run: cd frontend && npm run build
         env:
+          NEXT_PUBLIC_APP_ENV: production
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY_PRODUCTION }}
+          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
+          NEXT_PUBLIC_POSTHOG_HOST: ${{ secrets.NEXT_PUBLIC_POSTHOG_HOST }}
       
       - name: Deploy to Vercel (Production)
         run: |

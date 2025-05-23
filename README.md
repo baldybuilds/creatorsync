@@ -136,3 +136,50 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📬 Contact
 
 Have questions or feedback? Open an issue or reach out to us at [your-email@example.com](mailto:your-email@example.com)
+
+## 🏗️ **Environment Architecture**
+
+### **Local Development**
+- **Purpose**: Independent development environment
+- **Database**: Local PostgreSQL instance
+- **Clerk**: Development environment with test users
+- **Domain**: `localhost:3000` (frontend) + `localhost:8080` (backend)
+
+### **Staging (QA Environment)**
+- **Purpose**: Production mirror for quality assurance testing
+- **Database**: **Production database** (shared with production)
+- **Clerk**: **Production Clerk environment** (same user IDs as production)
+- **Domain**: `dev.creatorsync.app` (frontend) + `api-dev.creatorsync.app` (backend)
+- **Users**: Real production users can test new features before release
+
+### **Production**
+- **Purpose**: Live environment for end users
+- **Database**: Production PostgreSQL database
+- **Clerk**: Production Clerk environment
+- **Domain**: `creatorsync.app` (frontend) + `api.creatorsync.app` (backend)
+
+## ✅ **Benefits of This Architecture**
+
+1. **True QA Testing**: Staging uses identical data and users as production
+2. **No Cross-Environment Issues**: Staging Clerk user IDs match database user IDs
+3. **Real User Testing**: Production users can safely test new features on staging
+4. **Simplified Deployment**: No complex data syncing between environments
+5. **Consistent User Experience**: Same OAuth tokens and user profiles across environments
+
+## 🚀 **Deployment**
+
+### Staging Deployment
+```bash
+git push origin staging
+```
+- Deploys to Railway staging service with production database connection
+- Uses production Clerk environment for authentication
+- Available at staging domains for QA testing
+
+### Production Deployment
+```bash
+git push origin production
+```
+- Deploys to Railway production service
+- Uses production database and Clerk environment
+- Available at production domains for end users

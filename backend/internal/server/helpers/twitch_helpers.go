@@ -36,29 +36,10 @@ func ensureUserExistsInDatabase(ctx context.Context, db database.Service, userID
 		return nil // User already exists
 	}
 
-	// User doesn't exist, let's create them
-	// Try to get user's Clerk profile, but handle cross-environment cases gracefully
+	// User doesn't exist, let's create them from Clerk
 	clerkUser, err := clerk.GetUserByID(ctx, userID)
 	if err != nil {
-		// If Clerk user doesn't exist (e.g., cross-environment user ID), create basic record
-		log.Printf("⚠️ Clerk user %s not found in current environment, creating basic user record: %v", userID, err)
-		
-		// Create minimal user record with just the Clerk ID
-		user := &analytics.User{
-			ID:          userID,
-			ClerkUserID: userID,
-			Username:    fmt.Sprintf("user_%s", userID[5:15]), // Create a basic username from ID
-			DisplayName: "Unknown User",
-			Email:       "",
-		}
-
-		// Create user record in database
-		if err := analyticsRepo.CreateOrUpdateUser(ctx, user); err != nil {
-			return fmt.Errorf("failed to create basic user record: %w", err)
-		}
-
-		log.Printf("✅ Created basic user record for cross-environment user %s", userID)
-		return nil
+		return fmt.Errorf("failed to get user from Clerk: %w", err)
 	}
 
 	// Initialize user with basic info from Clerk
@@ -153,9 +134,7 @@ func GetTwitchRequestContext(c *fiber.Ctx) (*TwitchRequestContext, error) {
 
 	clerkUser, clerkErr := clerk.GetUserByID(c.Context(), user.ID)
 	if clerkErr != nil {
-		// Handle cross-environment user ID case more gracefully
-		log.Printf("⚠️ Clerk user %s not found in current environment: %v", user.ID, clerkErr)
-		return nil, fmt.Errorf("user profile not available in current environment - this may be a cross-environment data issue")
+		return nil, fmt.Errorf("failed to get user from Clerk: %v", clerkErr)
 	}
 
 	var foundTwitchUserID string

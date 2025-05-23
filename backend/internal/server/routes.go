@@ -18,6 +18,8 @@ func (s *FiberServer) RegisterFiberRoutes() {
 
 	if env == "production" {
 		allowedOrigins = "https://creatorsync.app,https://www.creatorsync.app"
+	} else if env == "staging" {
+		allowedOrigins = "https://dev.creatorsync.app"
 	} else {
 		allowedOrigins = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
 	}

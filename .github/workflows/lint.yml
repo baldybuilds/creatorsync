@@ -2,9 +2,9 @@ name: Lint
 
 on:
   pull_request:
-    branches: [ main, develop ]
+    branches: [ production, develop, staging ]
   push:
-    branches: [ main, develop ]
+    branches: [ production, develop, staging ]
 
 jobs:
   lint-frontend:

@@ -97,9 +97,16 @@ class AnalyticsService {
     private baseUrl: string;
 
     constructor() {
-        this.baseUrl = process.env.NODE_ENV === 'production'
-            ? 'https://api.creatorsync.app'
-            : 'http://localhost:8080';
+        // Check if we're in staging environment
+        if (typeof window !== 'undefined' && window.location.hostname === 'dev.creatorsync.app') {
+            this.baseUrl = 'https://api-dev.creatorsync.app';
+        } else if (process.env.NEXT_PUBLIC_APP_ENV === 'staging') {
+            this.baseUrl = 'https://api-dev.creatorsync.app';
+        } else if (process.env.NODE_ENV === 'production') {
+            this.baseUrl = 'https://api.creatorsync.app';
+        } else {
+            this.baseUrl = 'http://localhost:8080';
+        }
     }
 
     private async makeRequest<T>(

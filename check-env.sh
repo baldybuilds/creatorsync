@@ -28,6 +28,11 @@ if [ -f "backend/.env" ]; then
     if grep -q "APP_ENV=" backend/.env; then
         APP_ENV=$(grep "APP_ENV=" backend/.env | cut -d'=' -f2 | tr -d '"' | tr -d "'")
         echo "✅ APP_ENV is set to: $APP_ENV"
+        if [ "$APP_ENV" = "staging" ]; then
+            echo "   🔧 Staging environment detected"
+        elif [ "$APP_ENV" = "production" ]; then
+            echo "   🚀 Production environment detected"
+        fi
     else
         echo "⚠️  APP_ENV not set (will default to development mode)"
     fi

@@ -59,9 +59,17 @@ export function ContentSection() {
             setError(null);
 
             try {
-                const apiBaseUrl = process.env.NODE_ENV === 'production'
-                    ? 'https://api.creatorsync.app'
-                    : 'http://localhost:8080';
+                // Determine API base URL based on environment
+                let apiBaseUrl: string;
+                if (typeof window !== 'undefined' && window.location.hostname === 'dev.creatorsync.app') {
+                    apiBaseUrl = 'https://api-dev.creatorsync.app';
+                } else if (process.env.NEXT_PUBLIC_APP_ENV === 'staging') {
+                    apiBaseUrl = 'https://api-dev.creatorsync.app';
+                } else if (process.env.NODE_ENV === 'production') {
+                    apiBaseUrl = 'https://api.creatorsync.app';
+                } else {
+                    apiBaseUrl = 'http://localhost:8080';
+                }
 
                 let token;
                 try {
@@ -88,7 +96,7 @@ export function ContentSection() {
                     if (videosResponse.status === 401) {
                         throw new Error("Session expired. Please sign in again.");
                     }
-                    
+
                     let errorMessage = `Failed to fetch videos: ${videosResponse.status}`;
                     try {
                         const errorData = await videosResponse.json();
@@ -141,7 +149,7 @@ export function ContentSection() {
 
             } catch (err: unknown) {
                 console.error('Error fetching content:', err);
-                
+
                 if (err instanceof Error) {
                     setError(err.message);
                 } else {
@@ -178,7 +186,7 @@ export function ContentSection() {
             const hours = parseInt(match[1] || '0');
             const minutes = parseInt(match[2] || '0');
             const seconds = parseInt(match[3] || '0');
-            
+
             if (hours > 0) {
                 return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
             } else {
@@ -212,9 +220,9 @@ export function ContentSection() {
                 <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-6">
                     <h3 className="text-red-500 font-semibold mb-2">Error Loading Content</h3>
                     <p className="text-red-500/80">{error}</p>
-                    <Button 
-                        variant="outline" 
-                        size="sm" 
+                    <Button
+                        variant="outline"
+                        size="sm"
                         className="mt-4"
                         onClick={() => window.location.reload()}
                     >
@@ -271,11 +279,10 @@ export function ContentSection() {
                                     </div>
                                     {/* Video type badge */}
                                     <div className="absolute top-2 left-2">
-                                        <span className={`text-xs px-2 py-1 rounded-md font-medium ${
-                                            video.type === 'clip' 
-                                                ? 'bg-purple-500/80 text-white' 
-                                                : 'bg-blue-500/80 text-white'
-                                        }`}>
+                                        <span className={`text-xs px-2 py-1 rounded-md font-medium ${video.type === 'clip'
+                                            ? 'bg-purple-500/80 text-white'
+                                            : 'bg-blue-500/80 text-white'
+                                            }`}>
                                             {video.type === 'clip' ? 'CLIP' : 'VOD'}
                                         </span>
                                     </div>
@@ -289,7 +296,7 @@ export function ContentSection() {
                                     <h3 className="font-semibold text-light-surface-900 dark:text-dark-surface-100 mb-2 line-clamp-2 leading-tight">
                                         {video.title}
                                     </h3>
-                                    
+
                                     <div className="flex items-center gap-4 text-sm text-light-surface-600 dark:text-dark-surface-400 mb-4">
                                         <div className="flex items-center gap-1">
                                             <Eye className="w-4 h-4" />
@@ -337,8 +344,8 @@ export function ContentSection() {
                             No {type} found
                         </h4>
                         <p className="text-light-surface-600 dark:text-dark-surface-400">
-                            {type === 'broadcasts' 
-                                ? 'Your past broadcasts and highlights will appear here.' 
+                            {type === 'broadcasts'
+                                ? 'Your past broadcasts and highlights will appear here.'
                                 : 'Your clips will appear here once created.'}
                         </p>
                     </motion.div>

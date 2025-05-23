@@ -36,6 +36,12 @@ func (s *FiberServer) RegisterFiberRoutes() {
 		MaxAge:           300,
 	}))
 
+	// Add middleware to inject database service into context
+	s.App.Use(func(c *fiber.Ctx) error {
+		c.Locals("db", s.db)
+		return c.Next()
+	})
+
 	// Public routes
 	s.App.Get("/", s.HelloWorldHandler)
 	s.App.Get("/health", s.healthHandler)

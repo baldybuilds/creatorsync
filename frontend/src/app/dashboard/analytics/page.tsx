@@ -73,7 +73,7 @@ const formatNumber = (num: number | undefined | null): string => {
     if (num === undefined || num === null || isNaN(num)) {
         return '0';
     }
-    
+
     if (num >= 1000000) {
         return `${(num / 1000000).toFixed(1)}M`;
     }
@@ -88,7 +88,7 @@ const formatDuration = (hours: number | undefined | null): string => {
     if (hours === undefined || hours === null || isNaN(hours)) {
         return '0 min';
     }
-    
+
     if (hours >= 1) {
         return `${Math.round(hours)} hrs`;
     }
@@ -141,11 +141,10 @@ const TimePeriodSelector = ({
             <button
                 key={period}
                 onClick={() => onSelect(period)}
-                className={`px-4 py-2 text-sm rounded-md transition-all duration-200 ${
-                    selected === period
-                        ? 'bg-emerald-500 text-white font-medium'
-                        : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
-                }`}
+                className={`px-4 py-2 text-sm rounded-md transition-all duration-200 ${selected === period
+                    ? 'bg-emerald-500 text-white font-medium'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                    }`}
             >
                 {period} Days
             </button>
@@ -168,20 +167,20 @@ const PerformanceChart = ({
     >
         <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-white">Performance Over Time</h3>
-            <TimePeriodSelector selected={timeRange} onSelect={() => {}} />
+            <TimePeriodSelector selected={timeRange} onSelect={() => { }} />
         </div>
         <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={data}>
                     <defs>
                         <linearGradient id="viewsGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                         </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                    <XAxis 
-                        dataKey="date" 
+                    <XAxis
+                        dataKey="date"
                         stroke="#9ca3af"
                         fontSize={12}
                         tickFormatter={(value) => {
@@ -292,8 +291,8 @@ const ContentDistributionChart = ({
             <ResponsiveContainer width="100%" height="100%">
                 <RechartsBarChart data={data}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                    <XAxis 
-                        dataKey="date" 
+                    <XAxis
+                        dataKey="date"
                         stroke="#9ca3af"
                         fontSize={12}
                         tickFormatter={(value) => {
@@ -335,15 +334,39 @@ export default function AnalyticsPage() {
     const [refreshing, setRefreshing] = useState(false);
     const [timeRange] = useState('30');
 
+    // Helper function to get API base URL based on environment
+    const getApiBaseUrl = () => {
+        if (typeof window !== 'undefined' && window.location.hostname === 'dev.creatorsync.app') {
+            return 'https://api-dev.creatorsync.app';
+        } else if (process.env.NEXT_PUBLIC_APP_ENV === 'staging') {
+            return 'https://api-dev.creatorsync.app';
+        } else if (process.env.NODE_ENV === 'production') {
+            return 'https://api.creatorsync.app';
+        } else {
+            return 'http://localhost:8080';
+        }
+    };
+
     // Fetch enhanced analytics data
     const fetchAnalyticsData = useCallback(async () => {
         if (!isLoaded || !isSignedIn) return;
 
         try {
             const token = await getToken();
-            const apiBaseUrl = process.env.NODE_ENV === 'production'
-                ? 'https://api.creatorsync.app'
-                : 'http://localhost:8080';
+            const apiBaseUrl = getApiBaseUrl();
+
+            // Sync user to ensure they exist in the database (especially for staging)
+            try {
+                await fetch(`${apiBaseUrl}/api/user/sync`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+            } catch (syncError) {
+                console.warn('User sync failed, continuing anyway:', syncError);
+            }
 
             const response = await fetch(`${apiBaseUrl}/api/analytics/enhanced?days=${timeRange}`, {
                 headers: {
@@ -379,9 +402,7 @@ export default function AnalyticsPage() {
 
         try {
             const token = await getToken();
-            const apiBaseUrl = process.env.NODE_ENV === 'production'
-                ? 'https://api.creatorsync.app'
-                : 'http://localhost:8080';
+            const apiBaseUrl = getApiBaseUrl();
 
             console.log('🔄 Triggering manual data collection...');
             const response = await fetch(`${apiBaseUrl}/api/analytics/collect`, {

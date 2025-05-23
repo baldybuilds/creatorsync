@@ -22,10 +22,12 @@ tmp/
 .vscode
 .idea
 .windsurf
+*.sh
 
 # .env file
 .env
 .env.local
+.env.staging
 
 # Project build
 main

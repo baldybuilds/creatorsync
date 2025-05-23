@@ -78,7 +78,7 @@ export function Navbar({ className }: NavbarProps) {
             </NavigationMenu.Root>
 
             {/* Auth Buttons */}
-            {(process.env.NODE_ENV !== 'production' || clerkAuthButtonEnabled) && (
+            {(process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_APP_ENV === 'staging' || clerkAuthButtonEnabled) && (
               <div className="hidden md:block">
                 <SignedOut>
                   <SignInButton>

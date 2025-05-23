@@ -1,0 +1,98 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.22.x"
+
+      - name: Run backend tests
+        working-directory: ./backend
+        run: |
+          go mod download
+          go test ./... -v
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+      
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+      
+      - name: Run frontend linting
+        run: cd frontend && npm run lint
+      
+      - name: Build frontend
+        run: cd frontend && npm run build
+
+  deploy-backend-production:
+    needs: [test-backend, test-frontend]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.22.x"
+
+      - name: Build backend
+        working-directory: ./backend
+        run: |
+          go mod download
+          go build -o creatorsync ./cmd/api
+
+      - name: Deploy to Railway (Production)
+        run: |
+          echo "🚀 Backend deployment to Railway production environment would happen here"
+          echo "This would typically use Railway CLI or API to deploy to production service"
+          # Railway deployment commands would go here
+          # Example: railway deploy --service=creatorsync-api-production
+
+  deploy-frontend-production:
+    needs: [test-backend, test-frontend]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+      
+      - name: Install dependencies
+        run: cd frontend && npm ci
+      
+      - name: Build for production
+        run: cd frontend && npm run build
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY_PRODUCTION }}
+      
+      - name: Deploy to Vercel (Production)
+        run: |
+          echo "🚀 Frontend deployment to Vercel production environment would happen here"
+          echo "This would typically use Vercel CLI to deploy to production project"
+          # Vercel deployment commands would go here
+          # Example: vercel deploy --prod --token ${{ secrets.VERCEL_TOKEN }} --scope production 

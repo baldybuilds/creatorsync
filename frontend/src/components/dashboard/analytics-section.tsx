@@ -1,9 +1,128 @@
 'use client';
 
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
+import { useAuth } from '@clerk/nextjs';
 import { BarChart3, TrendingUp, Users, Eye, Clock, Calendar } from 'lucide-react';
 
+interface DashboardOverview {
+    totalViews: number;
+    videoCount: number;
+    averageViewsPerVideo: number;
+    totalWatchTimeHours: number;
+    currentFollowers: number;
+    currentSubscribers: number;
+    followerChange: number;
+    subscriberChange: number;
+}
+
 export function AnalyticsSection() {
+    const { isLoaded, isSignedIn, getToken } = useAuth();
+    const [overview, setOverview] = useState<DashboardOverview | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchAnalyticsOverview = useCallback(async () => {
+        if (!isLoaded || !isSignedIn) return;
+
+        try {
+            const token = await getToken();
+            const apiBaseUrl = process.env.NODE_ENV === 'production'
+                ? 'https://api.creatorsync.app'
+                : 'http://localhost:8080';
+
+            const response = await fetch(`${apiBaseUrl}/api/analytics/overview`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setOverview(data);
+            } else {
+                console.error('Failed to fetch analytics overview:', response.status);
+                setError('Failed to load analytics data');
+            }
+        } catch (error) {
+            console.error('Error fetching analytics overview:', error);
+            setError('Failed to load analytics data');
+        } finally {
+            setIsLoading(false);
+        }
+    }, [isLoaded, isSignedIn, getToken]);
+
+    useEffect(() => {
+        fetchAnalyticsOverview();
+    }, [fetchAnalyticsOverview]);
+
+    const formatNumber = (num: number | undefined | null): string => {
+        if (num === undefined || num === null || isNaN(num)) {
+            return '0';
+        }
+        
+        if (num >= 1000000) {
+            return `${(num / 1000000).toFixed(1)}M`;
+        }
+        if (num >= 1000) {
+            return `${(num / 1000).toFixed(1)}K`;
+        }
+        return Math.round(num).toString();
+    };
+
+    const formatDuration = (hours: number | undefined | null): string => {
+        if (hours === undefined || hours === null || isNaN(hours)) {
+            return '0 min';
+        }
+        
+        if (hours >= 1) {
+            return `${Math.round(hours)} hrs`;
+        }
+        return `${Math.round(hours * 60)} min`;
+    };
+
+    if (!isLoaded || !isSignedIn) {
+        return (
+            <div className="p-8">
+                <div className="flex items-center justify-center h-64">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
+                </div>
+            </div>
+        );
+    }
+
+    if (isLoading) {
+        return (
+            <div className="p-8">
+                <div className="flex items-center justify-center h-64">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="p-8">
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-6">
+                    <h3 className="text-red-500 font-semibold mb-2">Error Loading Analytics</h3>
+                    <p className="text-red-500/80">{error}</p>
+                </div>
+            </div>
+        );
+    }
+
+    const safeOverview = {
+        totalViews: overview?.totalViews ?? 0,
+        videoCount: overview?.videoCount ?? 0,
+        averageViewsPerVideo: overview?.averageViewsPerVideo ?? 0,
+        totalWatchTimeHours: overview?.totalWatchTimeHours ?? 0,
+        currentFollowers: overview?.currentFollowers ?? 0,
+        currentSubscribers: overview?.currentSubscribers ?? 0,
+        followerChange: overview?.followerChange ?? 0,
+        subscriberChange: overview?.subscriberChange ?? 0
+    };
     return (
         <div className="p-8">
             <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/20 border border-blue-500/30 text-blue-500 text-sm mb-6 w-fit">
@@ -33,8 +152,8 @@ export function AnalyticsSection() {
                         <h3 className="text-lg font-semibold text-light-surface-900 dark:text-dark-surface-100">Total Views</h3>
                     </div>
                     <div className="mb-2">
-                        <span className="text-4xl font-bold text-light-surface-900 dark:text-dark-surface-100">543</span>
-                        <span className="text-light-surface-600 dark:text-dark-surface-400 ml-2">Across 8 videos</span>
+                        <span className="text-4xl font-bold text-light-surface-900 dark:text-dark-surface-100">{formatNumber(safeOverview.totalViews)}</span>
+                        <span className="text-light-surface-600 dark:text-dark-surface-400 ml-2">Across {safeOverview.videoCount} videos</span>
                     </div>
                 </motion.div>
 
@@ -49,7 +168,7 @@ export function AnalyticsSection() {
                         <h3 className="text-lg font-semibold text-light-surface-900 dark:text-dark-surface-100">Average Views</h3>
                     </div>
                     <div className="mb-2">
-                        <span className="text-4xl font-bold text-light-surface-900 dark:text-dark-surface-100">68</span>
+                        <span className="text-4xl font-bold text-light-surface-900 dark:text-dark-surface-100">{formatNumber(safeOverview.averageViewsPerVideo)}</span>
                         <span className="text-light-surface-600 dark:text-dark-surface-400 ml-2">Per video</span>
                     </div>
                 </motion.div>
@@ -113,7 +232,7 @@ export function AnalyticsSection() {
                 >
                     <Eye className="w-8 h-8 text-brand-500 mx-auto mb-3" />
                     <h4 className="text-sm font-medium text-light-surface-700 dark:text-dark-surface-300 mb-1">Views</h4>
-                    <p className="text-2xl font-bold text-light-surface-900 dark:text-dark-surface-100">543</p>
+                    <p className="text-2xl font-bold text-light-surface-900 dark:text-dark-surface-100">{formatNumber(safeOverview.totalViews)}</p>
                 </motion.div>
 
                 <motion.div
@@ -124,7 +243,7 @@ export function AnalyticsSection() {
                 >
                     <Clock className="w-8 h-8 text-brand-500 mx-auto mb-3" />
                     <h4 className="text-sm font-medium text-light-surface-700 dark:text-dark-surface-300 mb-1">Watch Time (est.)</h4>
-                    <p className="text-2xl font-bold text-light-surface-900 dark:text-dark-surface-100">0 min</p>
+                    <p className="text-2xl font-bold text-light-surface-900 dark:text-dark-surface-100">{formatDuration(safeOverview.totalWatchTimeHours)}</p>
                 </motion.div>
 
                 <motion.div
@@ -135,7 +254,7 @@ export function AnalyticsSection() {
                 >
                     <Users className="w-8 h-8 text-brand-500 mx-auto mb-3" />
                     <h4 className="text-sm font-medium text-light-surface-700 dark:text-dark-surface-300 mb-1">Avg. Views/Video</h4>
-                    <p className="text-2xl font-bold text-light-surface-900 dark:text-dark-surface-100">68</p>
+                    <p className="text-2xl font-bold text-light-surface-900 dark:text-dark-surface-100">{formatNumber(safeOverview.averageViewsPerVideo)}</p>
                 </motion.div>
             </div>
 

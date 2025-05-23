@@ -30,6 +30,9 @@ type Service interface {
 
 	// System stats (admin only)
 	GetSystemStats(ctx context.Context) (*SystemStats, error)
+
+	// Data freshness check
+	CheckUserAnalyticsData(ctx context.Context, userID string) (hasData bool, lastUpdate *time.Time, err error)
 }
 
 type service struct {
@@ -254,6 +257,11 @@ func (s *service) GetSystemStats(ctx context.Context) (*SystemStats, error) {
 		return nil, fmt.Errorf("failed to get system stats: %w", err)
 	}
 	return stats, nil
+}
+
+// CheckUserAnalyticsData checks if a user has analytics data and when it was last updated
+func (s *service) CheckUserAnalyticsData(ctx context.Context, userID string) (bool, *time.Time, error) {
+	return s.repo.CheckUserAnalyticsData(ctx, userID)
 }
 
 // Helper function to generate mock chart data when no real data exists

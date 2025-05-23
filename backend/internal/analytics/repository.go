@@ -47,6 +47,9 @@ type Repository interface {
 
 	// System Stats
 	GetSystemStats(ctx context.Context) (*SystemStats, error)
+
+	// Data freshness check
+	CheckUserAnalyticsData(ctx context.Context, userID string) (hasData bool, lastUpdate *time.Time, err error)
 }
 
 type repository struct {
@@ -484,10 +487,11 @@ func (r *repository) getVideoBasedOverview(ctx context.Context, userID string, d
 	err := r.db.QueryRowContext(ctx, videoQuery, userID).Scan(
 		&totalViews, &videoCount, &avgViews, &totalHours)
 	if err != nil {
+		log.Printf("❌ Error executing video query for user %s: %v", userID, err)
 		return nil, err
 	}
 
-	log.Printf("Enhanced analytics query for user %s: found %d videos, %d total views", userID, videoCount, totalViews)
+	log.Printf("📊 Enhanced analytics query for user %s: found %d videos, %d total views, %.2f avg views, %.2f total hours", userID, videoCount, totalViews, avgViews, totalHours)
 
 	// Get channel metrics (followers, subscribers) from latest channel analytics
 	channelQuery := `
@@ -679,4 +683,38 @@ func (r *repository) GetSystemStats(ctx context.Context) (*SystemStats, error) {
 	stats.AverageCollectionTime = "~30s"
 
 	return &stats, nil
+}
+
+// CheckUserAnalyticsData checks if a user has analytics data and when it was last updated
+func (r *repository) CheckUserAnalyticsData(ctx context.Context, userID string) (bool, *time.Time, error) {
+	query := `
+		SELECT 
+			CASE 
+				WHEN COUNT(*) > 0 THEN true 
+				ELSE false 
+			END as has_data,
+			MAX(created_at) as last_update
+		FROM (
+			SELECT created_at FROM channel_analytics WHERE user_id = $1
+			UNION ALL
+			SELECT created_at FROM video_analytics WHERE user_id = $1
+			UNION ALL
+			SELECT created_at FROM stream_sessions WHERE user_id = $1
+		) all_data
+	`
+
+	var hasData bool
+	var lastUpdate sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(&hasData, &lastUpdate)
+	if err != nil {
+		return false, nil, err
+	}
+
+	var lastUpdatePtr *time.Time
+	if lastUpdate.Valid {
+		lastUpdatePtr = &lastUpdate.Time
+	}
+
+	return hasData, lastUpdatePtr, nil
 }

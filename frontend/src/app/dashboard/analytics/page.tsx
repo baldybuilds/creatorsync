@@ -8,8 +8,9 @@ import {
     Eye,
     Video,
     RefreshCw,
-    Play,
-    BarChart3
+    BarChart3,
+    Heart,
+    Users
 } from 'lucide-react';
 import {
     BarChart as RechartsBarChart,
@@ -241,6 +242,40 @@ const BottomStatsRow = ({
     </div>
 );
 
+// Growth metrics row
+const GrowthStatsRow = ({
+    followers,
+    subscribers,
+    followerChange,
+    subscriberChange
+}: {
+    followers: number | undefined | null;
+    subscribers: number | undefined | null;
+    followerChange: number | undefined | null;
+    subscriberChange: number | undefined | null;
+}) => (
+    <div className="grid grid-cols-2 gap-6">
+        <div className="text-center">
+            <p className="text-gray-400 text-sm mb-2">Followers</p>
+            <p className="text-2xl font-bold text-white">{formatNumber(followers)}</p>
+            {followerChange !== 0 && (
+                <p className={`text-sm mt-1 ${followerChange && followerChange > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {followerChange && followerChange > 0 ? '+' : ''}{followerChange}
+                </p>
+            )}
+        </div>
+        <div className="text-center">
+            <p className="text-gray-400 text-sm mb-2">Subscribers</p>
+            <p className="text-2xl font-bold text-white">{formatNumber(subscribers)}</p>
+            {subscriberChange !== 0 && (
+                <p className={`text-sm mt-1 ${subscriberChange && subscriberChange > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {subscriberChange && subscriberChange > 0 ? '+' : ''}{subscriberChange}
+                </p>
+            )}
+        </div>
+    </div>
+);
+
 // Content Distribution Chart
 const ContentDistributionChart = ({
     data
@@ -339,7 +374,7 @@ export default function AnalyticsPage() {
         setRefreshing(false);
     };
 
-    const triggerDataCollection = async () => {
+    const handleManualCollection = async () => {
         if (!isLoaded || !isSignedIn) return;
 
         try {
@@ -348,7 +383,8 @@ export default function AnalyticsPage() {
                 ? 'https://api.creatorsync.app'
                 : 'http://localhost:8080';
 
-            await fetch(`${apiBaseUrl}/api/analytics/collect`, {
+            console.log('🔄 Triggering manual data collection...');
+            const response = await fetch(`${apiBaseUrl}/api/analytics/collect`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -356,12 +392,22 @@ export default function AnalyticsPage() {
                 },
             });
 
-            // Refresh data after collection
-            setTimeout(() => fetchAnalyticsData(), 2000);
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ Manual data collection triggered:', result);
+                // Wait a bit then refresh the analytics
+                setTimeout(async () => {
+                    await fetchAnalyticsData();
+                }, 3000);
+            } else {
+                console.error('❌ Failed to trigger manual collection:', response.status);
+            }
         } catch (error) {
-            console.error('Error triggering data collection:', error);
+            console.error('❌ Error triggering manual collection:', error);
         }
     };
+
+
 
     useEffect(() => {
         fetchAnalyticsData();
@@ -412,10 +458,9 @@ export default function AnalyticsPage() {
                     </div>
                     <div className="flex space-x-3">
                         <button
-                            onClick={triggerDataCollection}
+                            onClick={handleManualCollection}
                             className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
                         >
-                            <Play className="w-4 h-4 mr-2" />
                             Collect Data
                         </button>
                         <button
@@ -430,13 +475,27 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* Top Metrics Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
                     <EnhancedMetricCard
                         title="Total Views"
                         value={safeOverview.totalViews}
                         subtitle={`Across ${safeOverview.videoCount} videos`}
                         icon={Eye}
                         gradient="from-emerald-500/10 to-teal-500/5"
+                    />
+                    <EnhancedMetricCard
+                        title="Followers"
+                        value={safeOverview.currentFollowers}
+                        subtitle="Total followers"
+                        icon={Heart}
+                        gradient="from-rose-500/10 to-pink-500/5"
+                    />
+                    <EnhancedMetricCard
+                        title="Subscribers"
+                        value={safeOverview.currentSubscribers}
+                        subtitle="Total subscribers"
+                        icon={Users}
+                        gradient="from-violet-500/10 to-purple-500/5"
                     />
                     <EnhancedMetricCard
                         title="Average Views"
@@ -460,17 +519,33 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* Bottom Stats and Content Distribution */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* Bottom Stats */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Performance Stats */}
                     <motion.div
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
                     >
+                        <h3 className="text-lg font-semibold text-white mb-4">Performance</h3>
                         <BottomStatsRow
                             totalViews={safeOverview.totalViews}
                             watchTime={safeOverview.totalWatchTimeHours}
                             avgViews={safeOverview.averageViewsPerVideo}
+                        />
+                    </motion.div>
+
+                    {/* Growth Metrics */}
+                    <motion.div
+                        initial={{ y: 20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
+                    >
+                        <h3 className="text-lg font-semibold text-white mb-4">Growth</h3>
+                        <GrowthStatsRow
+                            followers={safeOverview.currentFollowers}
+                            subscribers={safeOverview.currentSubscribers}
+                            followerChange={safeOverview.followerChange}
+                            subscriberChange={safeOverview.subscriberChange}
                         />
                     </motion.div>
 

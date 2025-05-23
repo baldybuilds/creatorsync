@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { SignOutButton } from "@clerk/nextjs";
+import { useRouter, usePathname } from 'next/navigation';
 import { 
     BarChart2, 
     Video, 
@@ -20,16 +21,45 @@ interface SidebarProps {
     className?: string;
 }
 
+interface SectionItem {
+    name: string;
+    icon: React.ComponentType<{ className?: string }>;
+    id: string;
+    type: 'section' | 'route';
+    route?: string;
+}
+
 export function Sidebar({ className }: SidebarProps) {
     const { isCollapsed, setIsCollapsed, activeSection, setActiveSection } = useSidebar();
+    const router = useRouter();
+    const pathname = usePathname();
 
-    const sections = [
-        { name: 'Overview', icon: BarChart2, id: 'overview' },
-        { name: 'Content', icon: Video, id: 'content' },
-        { name: 'Analytics', icon: BarChart2, id: 'analytics' },
-        { name: 'Scheduled', icon: Calendar, id: 'scheduled' },
-        { name: 'Settings', icon: SettingsIcon, id: 'settings' },
+    const sections: SectionItem[] = [
+        { name: 'Overview', icon: BarChart2, id: 'overview', type: 'section' },
+        { name: 'Content', icon: Video, id: 'content', type: 'section' },
+        { name: 'Analytics', icon: BarChart2, id: 'analytics', type: 'route', route: '/dashboard/analytics' },
+        { name: 'Scheduled', icon: Calendar, id: 'scheduled', type: 'section' },
+        { name: 'Settings', icon: SettingsIcon, id: 'settings', type: 'section' },
     ];
+
+    const handleNavigation = (section: SectionItem) => {
+        if (section.type === 'route' && section.route) {
+            router.push(section.route);
+        } else {
+            // For section-based navigation, always go to main dashboard first
+            setActiveSection(section.id);
+            if (pathname !== '/dashboard') {
+                router.push('/dashboard');
+            }
+        }
+    };
+
+    const isActiveItem = (section: SectionItem) => {
+        if (section.type === 'route' && section.route) {
+            return pathname === section.route;
+        }
+        return activeSection === section.id && pathname === '/dashboard';
+    };
 
     return (
         <motion.aside
@@ -96,8 +126,6 @@ export function Sidebar({ className }: SidebarProps) {
                     isCollapsed ? "space-y-3" : "space-y-2"
                 )}>
                     {sections.map((section, index) => {
-                        const isActive = activeSection === section.id;
-                        
                         return (
                             <motion.div
                                 key={section.name}
@@ -106,17 +134,17 @@ export function Sidebar({ className }: SidebarProps) {
                                 transition={{ delay: index * 0.1 }}
                             >
                                 <button
-                                    onClick={() => setActiveSection(section.id)}
+                                    onClick={() => handleNavigation(section)}
                                     className={cn(
                                         "flex items-center rounded-xl group transition-all duration-300 relative overflow-hidden w-full",
-                                        isActive
+                                        isActiveItem(section)
                                             ? "bg-gradient-to-r from-brand-500/20 to-brand-600/10 text-brand-500 border border-brand-500/30 shadow-lg shadow-brand-500/10"
                                             : "text-light-surface-700 dark:text-dark-surface-300 hover:bg-light-surface-100/80 dark:hover:bg-dark-surface-800/80 hover:text-light-surface-900 dark:hover:text-dark-surface-100 border border-transparent hover:border-light-surface-300/50 dark:hover:border-dark-surface-700/50",
                                         isCollapsed ? "justify-center px-3 py-3 w-12 h-12" : "justify-start px-4 py-3"
                                     )}
                                 >
                                     {/* Animated background gradient */}
-                                    {isActive && (
+                                    {isActiveItem(section) && (
                                         <motion.div
                                             layoutId="activeTab"
                                             className="absolute inset-0 bg-gradient-to-r from-brand-500/10 to-transparent rounded-xl"
@@ -126,7 +154,7 @@ export function Sidebar({ className }: SidebarProps) {
                                     
                                     <section.icon className={cn(
                                         "transition-all duration-300 relative z-10",
-                                        isActive ? "text-brand-500" : "text-light-surface-500 dark:text-dark-surface-400 group-hover:text-light-surface-900 dark:group-hover:text-dark-surface-100",
+                                        isActiveItem(section) ? "text-brand-500" : "text-light-surface-500 dark:text-dark-surface-400 group-hover:text-light-surface-900 dark:group-hover:text-dark-surface-100",
                                         isCollapsed ? "w-5 h-5" : "w-5 h-5 mr-3"
                                     )} />
                                     

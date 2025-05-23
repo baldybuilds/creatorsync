@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"context"
 	"log"
 	"strconv"
 	"time"
@@ -66,6 +67,9 @@ func (h *Handlers) RegisterRoutes(app *fiber.App) {
 	protected.Post("/collect", h.TriggerDataCollection)
 	protected.Post("/refresh", h.RefreshChannelData)
 
+	// Debug endpoint to check data status
+	protected.Get("/debug/data-status", h.GetDataStatus)
+
 }
 
 // GetDashboardOverview returns summary metrics for the dashboard
@@ -77,6 +81,9 @@ func (h *Handlers) GetDashboardOverview(c *fiber.Ctx) error {
 		})
 	}
 	userID := user.ID
+
+	// Check if we need to trigger automatic data collection
+	h.triggerAutoDataCollectionIfNeeded(userID)
 
 	overview, err := h.service.GetDashboardOverview(c.Context(), userID)
 	if err != nil {
@@ -146,6 +153,11 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		})
 	}
 
+	log.Printf("🔍 Enhanced analytics request for user %s", userID)
+
+	// Check if we need to trigger automatic data collection
+	h.triggerAutoDataCollectionIfNeeded(userID)
+
 	// Get days parameter (default to 30)
 	daysStr := c.Query("days", "30")
 	days, err := strconv.Atoi(daysStr)
@@ -153,14 +165,16 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		days = 30
 	}
 
+	log.Printf("📊 Fetching enhanced analytics for user %s (days: %d)", userID, days)
 	analytics, err := h.service.GetEnhancedAnalytics(c.Context(), userID, days)
 	if err != nil {
-		log.Printf("Error getting enhanced analytics for user %s: %v", userID, err)
+		log.Printf("❌ Error getting enhanced analytics for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to get enhanced analytics",
 		})
 	}
 
+	log.Printf("✅ Enhanced analytics response for user %s: %+v", userID, analytics.Overview)
 	return c.JSON(analytics)
 }
 
@@ -280,6 +294,69 @@ func (h *Handlers) GetAnalyticsJobs(c *fiber.Ctx) error {
 		"jobs":      jobs,
 		"user_id":   userID,
 		"timestamp": time.Now().Unix(),
+	})
+}
+
+// triggerAutoDataCollectionIfNeeded checks if we should automatically collect data for a user
+func (h *Handlers) triggerAutoDataCollectionIfNeeded(userID string) {
+	log.Printf("🔍 Checking if data collection needed for user %s", userID)
+
+	// Check if user has any analytics data
+	hasData, lastUpdate, err := h.service.CheckUserAnalyticsData(context.Background(), userID)
+	if err != nil {
+		log.Printf("❌ Error checking analytics data for user %s: %v", userID, err)
+		return
+	}
+
+	log.Printf("📊 Data check for user %s: hasData=%v, lastUpdate=%v", userID, hasData, lastUpdate)
+
+	shouldCollect := false
+	reason := ""
+
+	if !hasData {
+		// No data exists - trigger collection for new users
+		shouldCollect = true
+		reason = "no existing data"
+	} else if lastUpdate != nil {
+		// Check if data is stale (older than 6 hours)
+		staleThreshold := time.Now().Add(-6 * time.Hour)
+		if lastUpdate.Before(staleThreshold) {
+			shouldCollect = true
+			reason = "data is stale (older than 6 hours)"
+		} else {
+			log.Printf("✅ Data is fresh for user %s (last update: %v)", userID, lastUpdate)
+		}
+	}
+
+	if shouldCollect {
+		log.Printf("🔄 Auto-triggering data collection for user %s: %s", userID, reason)
+		h.backgroundCollectionMgr.TriggerUserCollection(userID)
+	} else {
+		log.Printf("⏭️ No data collection needed for user %s", userID)
+	}
+}
+
+// GetDataStatus returns debug information about user's analytics data
+func (h *Handlers) GetDataStatus(c *fiber.Ctx) error {
+	userID, err := h.getUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User not authenticated",
+		})
+	}
+
+	hasData, lastUpdate, err := h.service.CheckUserAnalyticsData(c.Context(), userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"user_id":     userID,
+		"has_data":    hasData,
+		"last_update": lastUpdate,
+		"timestamp":   time.Now().Unix(),
 	})
 }
 

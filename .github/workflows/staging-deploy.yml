@@ -65,6 +65,18 @@ jobs:
           go mod download
           go build -o creatorsync ./cmd/api
 
+      - name: Sync Production Data to Staging
+        run: |
+          echo "🔄 Syncing production data to staging database..."
+          # Install PostgreSQL client
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          
+          # Run the sync script
+          export PROD_DATABASE_URL="${{ secrets.PROD_DATABASE_URL }}"
+          export STAGING_DATABASE_URL="${{ secrets.STAGING_DATABASE_URL }}"
+          chmod +x scripts/sync-prod-to-staging.sh
+          ./scripts/sync-prod-to-staging.sh
+
       - name: Deploy to Railway (Staging)
         run: |
           echo "🚀 Backend deployment to Railway staging environment would happen here"

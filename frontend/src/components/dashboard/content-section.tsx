@@ -84,6 +84,20 @@ export function ContentSection() {
                     throw new Error("Authentication failed: No token available");
                 }
 
+                // Sync user to ensure they exist in the database (especially for staging)
+                try {
+                    await fetch(`${apiBaseUrl}/api/user/sync`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                } catch (syncError) {
+                    console.warn('User sync failed, continuing anyway:', syncError);
+                    // Don't throw here, continue with the rest of the logic
+                }
+
                 // Fetch videos (broadcasts, highlights, uploads)
                 const videosResponse = await fetch(`${apiBaseUrl}/api/twitch/videos`, {
                     headers: {

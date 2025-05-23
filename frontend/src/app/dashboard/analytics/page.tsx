@@ -355,6 +355,19 @@ export default function AnalyticsPage() {
             const token = await getToken();
             const apiBaseUrl = getApiBaseUrl();
 
+            // Sync user to ensure they exist in the database (especially for staging)
+            try {
+                await fetch(`${apiBaseUrl}/api/user/sync`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+            } catch (syncError) {
+                console.warn('User sync failed, continuing anyway:', syncError);
+            }
+
             const response = await fetch(`${apiBaseUrl}/api/analytics/enhanced?days=${timeRange}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,

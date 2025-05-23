@@ -42,7 +42,7 @@ type service struct {
 }
 
 func NewService(db database.Service, twitchClient *twitch.Client) Service {
-	repo := NewRepository(db.GetDB())
+	repo := NewRepository(db)
 	collector := NewDataCollector(repo, twitchClient)
 
 	return &service{

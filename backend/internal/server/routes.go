@@ -153,7 +153,7 @@ func (s *FiberServer) getUserProfileHandler(c *fiber.Ctx) error {
 // ensureUserExistsInDatabase creates or updates a user record in our database
 func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID string) error {
 	// Check if user already exists in our database
-	analyticsRepo := analytics.NewRepository(s.db.GetDB())
+	analyticsRepo := analytics.NewRepository(s.db)
 	existingUser, err := analyticsRepo.GetUserByClerkID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to check existing user: %w", err)

@@ -7,7 +7,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/baldybuilds/creatorsync/internal/database"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -54,18 +53,13 @@ type Repository interface {
 }
 
 type repository struct {
-	dbService database.Service
+	db *sqlx.DB
 }
 
-func NewRepository(dbService database.Service) Repository {
+func NewRepository(db *sql.DB) Repository {
 	return &repository{
-		dbService: dbService,
+		db: sqlx.NewDb(db, "postgres"),
 	}
-}
-
-// Helper method to get a fresh database connection
-func (r *repository) getDB() *sqlx.DB {
-	return sqlx.NewDb(r.dbService.GetDB(), "postgres")
 }
 
 // User Management Methods
@@ -84,7 +78,7 @@ func (r *repository) CreateOrUpdateUser(ctx context.Context, user *User) error {
 			updated_at = NOW()
 		RETURNING id, created_at, updated_at
 	`
-	err := r.getDB().QueryRowContext(ctx, query,
+	err := r.db.QueryRowContext(ctx, query,
 		user.ID, user.ClerkUserID, user.TwitchUserID, user.Username,
 		user.DisplayName, user.Email, user.ProfileImageURL).Scan(
 		&user.ID, &user.CreatedAt, &user.UpdatedAt)
@@ -99,7 +93,7 @@ func (r *repository) GetUserByClerkID(ctx context.Context, clerkUserID string) (
 	`
 
 	var user User
-	err := r.getDB().GetContext(ctx, &user, query, clerkUserID)
+	err := r.db.GetContext(ctx, &user, query, clerkUserID)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -119,7 +113,7 @@ func (r *repository) SaveChannelAnalytics(ctx context.Context, analytics *Channe
 			total_views = EXCLUDED.total_views,
 			subscriber_count = EXCLUDED.subscriber_count
 	`
-	_, err := r.getDB().ExecContext(ctx, query,
+	_, err := r.db.ExecContext(ctx, query,
 		analytics.UserID, analytics.Date, analytics.FollowersCount,
 		analytics.FollowingCount, analytics.TotalViews, analytics.SubscriberCount)
 	return err
@@ -134,7 +128,7 @@ func (r *repository) GetChannelAnalytics(ctx context.Context, userID string, day
 	`
 
 	var analytics []ChannelAnalytics
-	err := r.getDB().SelectContext(ctx, &analytics, fmt.Sprintf(query, days), userID)
+	err := r.db.SelectContext(ctx, &analytics, fmt.Sprintf(query, days), userID)
 	return analytics, err
 }
 
@@ -148,7 +142,7 @@ func (r *repository) GetLatestChannelAnalytics(ctx context.Context, userID strin
 	`
 
 	var analytics ChannelAnalytics
-	err := r.getDB().GetContext(ctx, &analytics, query, userID)
+	err := r.db.GetContext(ctx, &analytics, query, userID)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -174,7 +168,7 @@ func (r *repository) SaveStreamSession(ctx context.Context, session *StreamSessi
 			followers_gained = EXCLUDED.followers_gained,
 			subscribers_gained = EXCLUDED.subscribers_gained
 	`
-	_, err := r.getDB().ExecContext(ctx, query,
+	_, err := r.db.ExecContext(ctx, query,
 		session.UserID, session.StreamID, session.Title, session.GameName, session.GameID,
 		session.StartedAt, session.EndedAt, session.DurationMinutes, session.PeakViewers,
 		session.AverageViewers, session.TotalChatters, session.FollowersGained, session.SubscribersGained)
@@ -193,7 +187,7 @@ func (r *repository) GetStreamSessions(ctx context.Context, userID string, limit
 	`
 
 	var sessions []StreamSession
-	err := r.getDB().SelectContext(ctx, &sessions, query, userID, limit)
+	err := r.db.SelectContext(ctx, &sessions, query, userID, limit)
 	return sessions, err
 }
 
@@ -208,7 +202,7 @@ func (r *repository) GetStreamSessionsByDateRange(ctx context.Context, userID st
 	`
 
 	var sessions []StreamSession
-	err := r.getDB().SelectContext(ctx, &sessions, query, userID, start, end)
+	err := r.db.SelectContext(ctx, &sessions, query, userID, start, end)
 	return sessions, err
 }
 
@@ -228,7 +222,7 @@ func (r *repository) SaveVideoAnalytics(ctx context.Context, video *VideoAnalyti
 			comment_count = EXCLUDED.comment_count,
 			updated_at = NOW()
 	`
-	_, err := r.getDB().ExecContext(ctx, query,
+	_, err := r.db.ExecContext(ctx, query,
 		video.UserID, video.VideoID, video.Title, video.VideoType, video.Duration,
 		video.ViewCount, video.LikeCount, video.CommentCount, video.ThumbnailURL, video.PublishedAt)
 	return err
@@ -245,7 +239,7 @@ func (r *repository) GetVideoAnalytics(ctx context.Context, userID string, limit
 	`
 
 	var videos []VideoAnalytics
-	err := r.getDB().SelectContext(ctx, &videos, query, userID, limit)
+	err := r.db.SelectContext(ctx, &videos, query, userID, limit)
 	return videos, err
 }
 
@@ -255,7 +249,7 @@ func (r *repository) UpdateVideoAnalytics(ctx context.Context, videoID string, v
 		SET view_count = $2, like_count = $3, comment_count = $4, updated_at = NOW()
 		WHERE video_id = $1
 	`
-	_, err := r.getDB().ExecContext(ctx, query, videoID, views, likes, comments)
+	_, err := r.db.ExecContext(ctx, query, videoID, views, likes, comments)
 	return err
 }
 
@@ -278,7 +272,7 @@ func (r *repository) SaveGameAnalytics(ctx context.Context, game *GameAnalytics)
 			last_streamed_at = EXCLUDED.last_streamed_at,
 			updated_at = NOW()
 	`
-	_, err := r.getDB().ExecContext(ctx, query,
+	_, err := r.db.ExecContext(ctx, query,
 		game.UserID, game.GameID, game.GameName, game.TotalStreams, game.TotalHoursStreamed,
 		game.AverageViewers, game.PeakViewers, game.TotalFollowersGained, game.LastStreamedAt)
 	return err
@@ -296,7 +290,7 @@ func (r *repository) GetTopGames(ctx context.Context, userID string, limit int) 
 	`
 
 	var games []GameAnalytics
-	err := r.getDB().SelectContext(ctx, &games, query, userID, limit)
+	err := r.db.SelectContext(ctx, &games, query, userID, limit)
 	return games, err
 }
 
@@ -340,7 +334,7 @@ AND started_at >= CURRENT_DATE - INTERVAL '30 days'
 `
 
 	var overview DashboardOverview
-	row := r.getDB().QueryRowContext(ctx, query, userID)
+	row := r.db.QueryRowContext(ctx, query, userID)
 
 	var avgViewers sql.NullFloat64
 	err := row.Scan(
@@ -375,7 +369,7 @@ func (r *repository) GetAnalyticsChartData(ctx context.Context, userID string, d
 		ORDER BY date ASC
 	`
 
-	rows, err := r.getDB().QueryContext(ctx, fmt.Sprintf(followerQuery, days), userID)
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(followerQuery, days), userID)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +484,7 @@ func (r *repository) getVideoBasedOverview(ctx context.Context, userID string, d
 
 	var totalViews, videoCount int
 	var avgViews, totalHours float64
-	err := r.getDB().QueryRowContext(ctx, videoQuery, userID).Scan(
+	err := r.db.QueryRowContext(ctx, videoQuery, userID).Scan(
 		&totalViews, &videoCount, &avgViews, &totalHours)
 	if err != nil {
 		log.Printf("❌ Error executing video query for user %s: %v", userID, err)
@@ -511,7 +505,7 @@ func (r *repository) getVideoBasedOverview(ctx context.Context, userID string, d
 	`
 
 	var currentFollowers, currentSubscribers int
-	err = r.getDB().QueryRowContext(ctx, channelQuery, userID).Scan(
+	err = r.db.QueryRowContext(ctx, channelQuery, userID).Scan(
 		&currentFollowers, &currentSubscribers)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
@@ -549,7 +543,7 @@ func (r *repository) getPerformanceData(ctx context.Context, userID string, days
 		ORDER BY date ASC
 	`
 
-	rows, err := r.getDB().QueryContext(ctx, fmt.Sprintf(viewsQuery, days), userID)
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(viewsQuery, days), userID)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +574,7 @@ func (r *repository) getPerformanceData(ctx context.Context, userID string, days
 		ORDER BY date ASC
 	`
 
-	rows, err = r.getDB().QueryContext(ctx, fmt.Sprintf(contentQuery, days), userID)
+	rows, err = r.db.QueryContext(ctx, fmt.Sprintf(contentQuery, days), userID)
 	if err != nil {
 		return nil, err
 	}
@@ -629,7 +623,7 @@ func (r *repository) CreateAnalyticsJob(ctx context.Context, job *AnalyticsJob) 
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
 	`
-	return r.getDB().GetContext(ctx, &job.ID, query, job.UserID, job.JobType, job.Status, job.DataDate)
+	return r.db.GetContext(ctx, &job.ID, query, job.UserID, job.JobType, job.Status, job.DataDate)
 }
 
 func (r *repository) UpdateAnalyticsJob(ctx context.Context, jobID int, status string, errorMsg *string) error {
@@ -638,7 +632,7 @@ func (r *repository) UpdateAnalyticsJob(ctx context.Context, jobID int, status s
 		SET status = $2, completed_at = NOW(), error_message = $3
 		WHERE id = $1
 	`
-	_, err := r.getDB().ExecContext(ctx, query, jobID, status, errorMsg)
+	_, err := r.db.ExecContext(ctx, query, jobID, status, errorMsg)
 	return err
 }
 
@@ -653,7 +647,7 @@ func (r *repository) GetAnalyticsJobs(ctx context.Context, userID string, limit 
 	`
 
 	var jobs []AnalyticsJob
-	err := r.getDB().SelectContext(ctx, &jobs, query, userID, limit)
+	err := r.db.SelectContext(ctx, &jobs, query, userID, limit)
 	return jobs, err
 }
 
@@ -671,7 +665,7 @@ func (r *repository) GetSystemStats(ctx context.Context) (*SystemStats, error) {
 	`
 
 	var stats SystemStats
-	row := r.getDB().QueryRowContext(ctx, query)
+	row := r.db.QueryRowContext(ctx, query)
 
 	err := row.Scan(
 		&stats.TotalUsers, &stats.ActiveUsers, &stats.TotalJobs,
@@ -712,7 +706,7 @@ func (r *repository) CheckUserAnalyticsData(ctx context.Context, userID string) 
 	var hasData bool
 	var lastUpdate sql.NullTime
 
-	err := r.getDB().QueryRowContext(ctx, query, userID).Scan(&hasData, &lastUpdate)
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(&hasData, &lastUpdate)
 	if err != nil {
 		return false, nil, err
 	}

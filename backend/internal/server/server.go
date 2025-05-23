@@ -40,7 +40,7 @@ func New() (*FiberServer, error) {
 
 	// Initialize analytics components
 	analyticsService := analytics.NewService(db, twitchClient)
-	dataCollector := analytics.NewDataCollector(analytics.NewRepository(db.GetDB()), twitchClient)
+	dataCollector := analytics.NewDataCollector(analytics.NewRepository(db), twitchClient)
 	backgroundMgr := analytics.NewBackgroundCollectionManager(dataCollector, db)
 	analyticsHandlers := analytics.NewHandlers(analyticsService, backgroundMgr)
 

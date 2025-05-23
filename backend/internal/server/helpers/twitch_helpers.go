@@ -26,7 +26,7 @@ type TwitchRequestContext struct {
 // ensureUserExistsInDatabase creates or updates a user record in our database
 func ensureUserExistsInDatabase(ctx context.Context, db database.Service, userID string) error {
 	// Check if user already exists in our database
-	analyticsRepo := analytics.NewRepository(db.GetDB())
+	analyticsRepo := analytics.NewRepository(db)
 	existingUser, err := analyticsRepo.GetUserByClerkID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to check existing user: %w", err)

@@ -174,7 +174,11 @@ func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID str
 	user := &analytics.User{
 		ID:          userID,
 		ClerkUserID: userID,
-		Email:       clerkUser.EmailAddresses[0].EmailAddress,
+	}
+
+	// Safely set email if available
+	if len(clerkUser.EmailAddresses) > 0 {
+		user.Email = clerkUser.EmailAddresses[0].EmailAddress
 	}
 
 	// Set name fields safely

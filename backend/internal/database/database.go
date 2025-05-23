@@ -18,21 +18,16 @@ type Service interface {
 	Close() error
 	GetDB() *sql.DB
 	RunMigrations() error
+	CheckConnection() error
+	Reconnect() error
 }
 
 type service struct {
-	db *sql.DB
+	db     *sql.DB
+	connStr string
 }
 
-var (
-	dbInstance *service
-)
-
 func New() Service {
-	if dbInstance != nil {
-		return dbInstance
-	}
-
 	var connStr string
 
 	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
@@ -60,14 +55,27 @@ func New() Service {
 		log.Fatal(err)
 	}
 
+	// Configure connection pool settings
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(30 * time.Second)
 
-	dbInstance = &service{
-		db: db,
+	// Test the connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	if err := db.PingContext(ctx); err != nil {
+		log.Printf("Failed to ping database: %v", err)
+		log.Fatal(err)
 	}
-	return dbInstance
+
+	log.Println("Database connection established successfully")
+
+	return &service{
+		db:     db,
+		connStr: connStr,
+	}
 }
 
 func (s *service) Health() map[string]string {
@@ -121,10 +129,58 @@ func (s *service) Close() error {
 }
 
 func (s *service) GetDB() *sql.DB {
+	// Check if connection is healthy
+	if err := s.CheckConnection(); err != nil {
+		log.Printf("Database connection unhealthy: %v, attempting reconnect...", err)
+		if reconnectErr := s.Reconnect(); reconnectErr != nil {
+			log.Printf("Failed to reconnect to database: %v", reconnectErr)
+			// Return the existing connection anyway - let the caller handle the error
+		}
+	}
 	return s.db
 }
 
 func (s *service) RunMigrations() error {
 	migrationRunner := NewMigrationRunner(s.db)
 	return migrationRunner.RunMigrations("migrations")
+}
+
+func (s *service) CheckConnection() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	
+	return s.db.PingContext(ctx)
+}
+
+func (s *service) Reconnect() error {
+	log.Println("Attempting to reconnect to database...")
+	
+	// Close the existing connection
+	if s.db != nil {
+		s.db.Close()
+	}
+	
+	// Create a new connection
+	db, err := sql.Open("pgx", s.connStr)
+	if err != nil {
+		return fmt.Errorf("failed to reconnect to database: %w", err)
+	}
+	
+	// Configure connection pool settings
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(30 * time.Second)
+	
+	// Test the new connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("failed to ping database after reconnect: %w", err)
+	}
+	
+	s.db = db
+	log.Println("Database reconnected successfully")
+	return nil
 }

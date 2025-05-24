@@ -47,7 +47,7 @@ func (c *Client) GetClips(ctx context.Context, userAccessToken string, broadcast
 	params.Add("first", strconv.Itoa(limit))
 
 	endTime := time.Now()
-	startTime := endTime.AddDate(0, 0, -365)
+	startTime := endTime.AddDate(0, 0, -731)
 	params.Add("started_at", startTime.Format(time.RFC3339))
 	params.Add("ended_at", endTime.Format(time.RFC3339))
 

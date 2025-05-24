@@ -163,20 +163,55 @@ func (dc *dataCollector) CollectVideoData(ctx context.Context, userID string) er
 
 	twitchUserID := userInfo.ID
 
-	// Collect videos using the same method as the content page
+	// Collect videos - use pagination to get more videos
 	log.Printf("Fetching videos for user %s (Twitch ID: %s)", userID, twitchUserID)
-	videos, _, err := dc.twitchClient.GetUserVideos(ctx, twitchToken, twitchUserID, 50)
-	if err != nil {
-		job.ErrorMessage = fmt.Sprintf("Failed to get videos: %v", err)
-		log.Printf("Failed to get videos for user %s: %v", userID, err)
-		return err
+
+	var allVideos []twitch.VideoInfo
+	limit := 100 // Maximum per request
+	totalVideosFetched := 0
+	maxVideos := 500 // Reasonable limit to avoid infinite loops
+
+	// Fetch videos with pagination
+	cursor := ""
+	for totalVideosFetched < maxVideos {
+		var videos []twitch.VideoInfo
+		var nextCursor string
+		var err error
+
+		if cursor == "" {
+			videos, nextCursor, err = dc.twitchClient.GetUserVideos(ctx, twitchToken, twitchUserID, limit)
+		} else {
+			// Note: Currently the GetUserVideos doesn't support cursor parameter
+			// This is a limitation we should address later
+			videos, nextCursor, err = dc.twitchClient.GetUserVideos(ctx, twitchToken, twitchUserID, limit)
+		}
+
+		if err != nil {
+			job.ErrorMessage = fmt.Sprintf("Failed to get videos: %v", err)
+			log.Printf("Failed to get videos for user %s: %v", userID, err)
+			return err
+		}
+
+		if len(videos) == 0 {
+			break // No more videos
+		}
+
+		allVideos = append(allVideos, videos...)
+		totalVideosFetched += len(videos)
+
+		log.Printf("Fetched %d videos (total: %d) for user %s", len(videos), totalVideosFetched, userID)
+
+		if nextCursor == "" || len(videos) < limit {
+			break // No more pages or last page had fewer than limit
+		}
+		cursor = nextCursor
 	}
 
-	log.Printf("Found %d videos for user %s", len(videos), userID)
+	log.Printf("Total videos fetched: %d for user %s", len(allVideos), userID)
 	videosSaved := 0
 
-	for _, video := range videos {
-		// Parse duration string to seconds (simplified - you can improve this later)
+	// Save videos to database
+	for _, video := range allVideos {
 		durationSeconds := 0
 		// TODO: Parse duration string properly (e.g., "1h23m45s" -> seconds)
 
@@ -184,7 +219,7 @@ func (dc *dataCollector) CollectVideoData(ctx context.Context, userID string) er
 			UserID:       userID,
 			VideoID:      video.ID,
 			Title:        video.Title,
-			VideoType:    video.Type, // Use the type from the API response
+			VideoType:    video.Type,
 			Duration:     durationSeconds,
 			ViewCount:    video.ViewCount,
 			ThumbnailURL: video.ThumbnailURL,
@@ -195,11 +230,45 @@ func (dc *dataCollector) CollectVideoData(ctx context.Context, userID string) er
 			log.Printf("Failed to save video analytics for video %s (%s): %v", video.ID, video.Title, err)
 		} else {
 			videosSaved++
-			log.Printf("Saved video: %s (ID: %s, Type: %s, Views: %d)", video.Title, video.ID, video.Type, video.ViewCount)
 		}
 	}
 
-	log.Printf("Successfully saved %d out of %d videos for user %s", videosSaved, len(videos), userID)
+	// Now collect clips
+	log.Printf("Fetching clips for user %s (Twitch ID: %s)", userID, twitchUserID)
+
+	clipLimit := 100 // Start with 100 clips
+	clips, err := dc.twitchClient.GetClips(ctx, twitchToken, twitchUserID, clipLimit)
+	if err != nil {
+		log.Printf("Failed to get clips for user %s: %v", userID, err)
+		// Don't fail the job for clips, continue
+	} else {
+		log.Printf("Found %d clips for user %s", len(clips), userID)
+		clipsSaved := 0
+
+		for _, clip := range clips {
+			// Convert clip to video analytics format
+			clipAnalytics := &VideoAnalytics{
+				UserID:       userID,
+				VideoID:      clip.ID,
+				Title:        clip.Title,
+				VideoType:    "clip",
+				Duration:     int(clip.Duration), // Duration is in seconds for clips
+				ViewCount:    clip.ViewCount,
+				ThumbnailURL: clip.ThumbnailURL,
+				PublishedAt:  &clip.CreatedAt,
+			}
+
+			if err := dc.repo.SaveVideoAnalytics(ctx, clipAnalytics); err != nil {
+				log.Printf("Failed to save clip analytics for clip %s (%s): %v", clip.ID, clip.Title, err)
+			} else {
+				clipsSaved++
+			}
+		}
+
+		log.Printf("Successfully saved %d out of %d clips for user %s", clipsSaved, len(clips), userID)
+	}
+
+	log.Printf("Data collection complete for user %s: %d videos, %d clips saved", userID, videosSaved, len(clips))
 	return nil
 }
 

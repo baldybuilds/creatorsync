@@ -65,7 +65,20 @@ func NewRepository(dbService database.Service) Repository {
 
 // Helper method to get a fresh database connection
 func (r *repository) getDB() *sqlx.DB {
-	return sqlx.NewDb(r.dbService.GetDB(), "postgres")
+	// Test connection health before returning
+	db := r.dbService.GetDB()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		log.Printf("⚠️ Database connection unhealthy: %v", err)
+		// Try to reconnect
+		if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
+			log.Printf("❌ Failed to reconnect to database: %v", reconnectErr)
+		}
+	}
+
+	return sqlx.NewDb(db, "postgres")
 }
 
 // User Management Methods
@@ -476,6 +489,8 @@ func (r *repository) GetEnhancedAnalytics(ctx context.Context, userID string, da
 
 // Helper method to calculate video-based overview metrics
 func (r *repository) getVideoBasedOverview(ctx context.Context, userID string, days int) (*VideoBasedOverview, error) {
+	log.Printf("🔍 Starting getVideoBasedOverview for user %s", userID)
+
 	// Get video metrics - show ALL videos for the user, not filtered by publish date
 	// because we want to show total channel metrics, not just recent videos
 	videoQuery := `
@@ -490,11 +505,15 @@ func (r *repository) getVideoBasedOverview(ctx context.Context, userID string, d
 
 	var totalViews, videoCount int
 	var avgViews, totalHours float64
-	err := r.getDB().QueryRowContext(ctx, videoQuery, userID).Scan(
+
+	db := r.getDB()
+	err := db.QueryRowContext(ctx, videoQuery, userID).Scan(
 		&totalViews, &videoCount, &avgViews, &totalHours)
 	if err != nil {
 		log.Printf("❌ Error executing video query for user %s: %v", userID, err)
-		return nil, err
+		log.Printf("❌ Query was: %s", videoQuery)
+		log.Printf("❌ User ID parameter: %s", userID)
+		return nil, fmt.Errorf("video query failed: %w", err)
 	}
 
 	log.Printf("📊 Enhanced analytics query for user %s: found %d videos, %d total views, %.2f avg views, %.2f total hours", userID, videoCount, totalViews, avgViews, totalHours)
@@ -511,17 +530,27 @@ func (r *repository) getVideoBasedOverview(ctx context.Context, userID string, d
 	`
 
 	var currentFollowers, currentSubscribers int
-	err = r.getDB().QueryRowContext(ctx, channelQuery, userID).Scan(
+	err = db.QueryRowContext(ctx, channelQuery, userID).Scan(
 		&currentFollowers, &currentSubscribers)
 	if err != nil && err != sql.ErrNoRows {
-		return nil, err
+		log.Printf("❌ Error executing channel query for user %s: %v", userID, err)
+		log.Printf("❌ Query was: %s", channelQuery)
+		return nil, fmt.Errorf("channel query failed: %w", err)
 	}
+
+	if err == sql.ErrNoRows {
+		log.Printf("⚠️ No channel analytics found for user %s, using default values", userID)
+		currentFollowers = 0
+		currentSubscribers = 0
+	}
+
+	log.Printf("📊 Channel metrics for user %s: %d followers, %d subscribers", userID, currentFollowers, currentSubscribers)
 
 	// Calculate follower/subscriber changes (simplified for now)
 	followerChange := 0   // TODO: Calculate from previous period
 	subscriberChange := 0 // TODO: Calculate from previous period
 
-	return &VideoBasedOverview{
+	result := &VideoBasedOverview{
 		TotalViews:           totalViews,
 		VideoCount:           videoCount,
 		AverageViewsPerVideo: avgViews,
@@ -530,7 +559,10 @@ func (r *repository) getVideoBasedOverview(ctx context.Context, userID string, d
 		CurrentSubscribers:   currentSubscribers,
 		FollowerChange:       followerChange,
 		SubscriberChange:     subscriberChange,
-	}, nil
+	}
+
+	log.Printf("✅ getVideoBasedOverview completed successfully for user %s", userID)
+	return result, nil
 }
 
 // Helper method to get performance data over time

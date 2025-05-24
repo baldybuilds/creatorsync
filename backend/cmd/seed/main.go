@@ -13,16 +13,18 @@ import (
 
 // TestUser represents a test user for local development
 type TestUser struct {
-	ID                string `gorm:"primaryKey"`
-	ClerkID           string `gorm:"uniqueIndex"`
+	ID                string  `gorm:"primaryKey"`
+	ClerkID           string  `gorm:"column:clerk_user_id;uniqueIndex"`
+	TwitchUserID      *string `gorm:"column:twitch_user_id"`
 	Username          string
+	DisplayName       *string `gorm:"column:display_name"`
 	Email             string
-	TwitchAccessToken *string
-	TwitchUserID      *string
-	TwitchUsername    *string
-	TwitchDisplayName *string
-	CreatedAt         string
-	UpdatedAt         string
+	ProfileImageURL   *string `gorm:"column:profile_image_url"`
+	TwitchAccessToken *string `gorm:"-"`
+	TwitchUsername    *string `gorm:"-"`
+	TwitchDisplayName *string `gorm:"-"`
+	CreatedAt         string  `gorm:"column:created_at"`
+	UpdatedAt         string  `gorm:"column:updated_at"`
 }
 
 func main() {
@@ -48,40 +50,37 @@ func main() {
 	// Create test users with obvious test data markers
 	testUsers := []TestUser{
 		{
-			ID:                "test-user-1",
-			ClerkID:           "user_test_dev_alice_123456789",
-			Username:          "test_alice_dev",
-			Email:             "test.alice.dev@example.com",
-			TwitchAccessToken: stringPtr("test_token_alice_dev"),
-			TwitchUserID:      stringPtr("test_twitch_alice_123"),
-			TwitchUsername:    stringPtr("test_alice_streamer"),
-			TwitchDisplayName: stringPtr("🧪 TEST Alice (DEV)"),
-			CreatedAt:         "2024-01-01T00:00:00Z",
-			UpdatedAt:         "2024-01-01T00:00:00Z",
+			ID:              "test-user-1",
+			ClerkID:         "user_test_dev_alice_123456789",
+			TwitchUserID:    stringPtr("test_twitch_alice_123"),
+			Username:        "test_alice_dev",
+			DisplayName:     stringPtr("🧪 TEST Alice (DEV)"),
+			Email:           "test.alice.dev@example.com",
+			ProfileImageURL: nil,
+			CreatedAt:       "2024-01-01T00:00:00Z",
+			UpdatedAt:       "2024-01-01T00:00:00Z",
 		},
 		{
-			ID:                "test-user-2",
-			ClerkID:           "user_test_dev_bob_987654321",
-			Username:          "test_bob_dev",
-			Email:             "test.bob.dev@example.com",
-			TwitchAccessToken: stringPtr("test_token_bob_dev"),
-			TwitchUserID:      stringPtr("test_twitch_bob_456"),
-			TwitchUsername:    stringPtr("test_bob_gamer"),
-			TwitchDisplayName: stringPtr("🧪 TEST Bob (DEV)"),
-			CreatedAt:         "2024-01-01T00:00:00Z",
-			UpdatedAt:         "2024-01-01T00:00:00Z",
+			ID:              "test-user-2",
+			ClerkID:         "user_test_dev_bob_987654321",
+			TwitchUserID:    stringPtr("test_twitch_bob_456"),
+			Username:        "test_bob_dev",
+			DisplayName:     stringPtr("🧪 TEST Bob (DEV)"),
+			Email:           "test.bob.dev@example.com",
+			ProfileImageURL: nil,
+			CreatedAt:       "2024-01-01T00:00:00Z",
+			UpdatedAt:       "2024-01-01T00:00:00Z",
 		},
 		{
-			ID:                "test-user-3",
-			ClerkID:           "user_test_dev_charlie_111222333",
-			Username:          "test_charlie_dev",
-			Email:             "test.charlie.dev@example.com",
-			TwitchAccessToken: nil, // Test user without Twitch connection
-			TwitchUserID:      nil,
-			TwitchUsername:    nil,
-			TwitchDisplayName: nil,
-			CreatedAt:         "2024-01-01T00:00:00Z",
-			UpdatedAt:         "2024-01-01T00:00:00Z",
+			ID:              "test-user-3",
+			ClerkID:         "user_test_dev_charlie_111222333",
+			TwitchUserID:    nil,
+			Username:        "test_charlie_dev",
+			DisplayName:     stringPtr("🧪 TEST Charlie (DEV)"),
+			Email:           "test.charlie.dev@example.com",
+			ProfileImageURL: nil,
+			CreatedAt:       "2024-01-01T00:00:00Z",
+			UpdatedAt:       "2024-01-01T00:00:00Z",
 		},
 	}
 
@@ -108,4 +107,4 @@ func main() {
 
 func stringPtr(s string) *string {
 	return &s
-} 
+}

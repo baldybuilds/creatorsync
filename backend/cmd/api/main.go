@@ -34,9 +34,40 @@ func gracefulShutdown(fiberServer *server.FiberServer, done chan bool) {
 }
 
 func main() {
+	// Log environment configuration on startup
+	log.Printf("🚀 Starting CreatorSync API Server")
+	log.Printf("📍 Environment: %s", os.Getenv("APP_ENV"))
+	log.Printf("🔌 Port: %s", os.Getenv("PORT"))
+
+	// Log database configuration (without sensitive info)
+	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
+		log.Printf("🗄️ Database: Using DATABASE_URL (configured)")
+	} else {
+		log.Printf("🗄️ Database: Using individual environment variables")
+		log.Printf("   Host: %s", os.Getenv("POSTGRES_DB_HOST"))
+		log.Printf("   Port: %s", os.Getenv("POSTGRES_DB_PORT"))
+		log.Printf("   Database: %s", os.Getenv("POSTGRES_DB_DATABASE"))
+		log.Printf("   Username: %s", os.Getenv("POSTGRES_DB_USERNAME"))
+	}
+
+	// Log authentication configuration
+	if clerkKey := os.Getenv("CLERK_SECRET_KEY"); clerkKey != "" {
+		keyPrefix := clerkKey[:10] + "..."
+		log.Printf("🔐 Clerk: Configured (%s)", keyPrefix)
+	} else {
+		log.Printf("⚠️ Clerk: NOT CONFIGURED")
+	}
+
+	// Log Twitch configuration
+	if twitchClientID := os.Getenv("TWITCH_CLIENT_ID"); twitchClientID != "" {
+		log.Printf("📺 Twitch: Configured")
+	} else {
+		log.Printf("⚠️ Twitch: NOT CONFIGURED")
+	}
+
 	server, err := server.New()
 	if err != nil {
-		log.Fatalf("Failed to initialize server: %v", err)
+		log.Fatalf("❌ Failed to initialize server: %v", err)
 	}
 
 	server.RegisterFiberRoutes()
@@ -45,6 +76,7 @@ func main() {
 
 	go func() {
 		port, _ := strconv.Atoi(os.Getenv("PORT"))
+		log.Printf("🌐 Server listening on port %d", port)
 		err := server.Listen(fmt.Sprintf(":%d", port))
 		if err != nil {
 			panic(fmt.Sprintf("http server error: %s", err))
@@ -54,5 +86,5 @@ func main() {
 	go gracefulShutdown(server, done)
 
 	<-done
-	log.Println("Graceful shutdown complete.")
+	log.Println("✅ Graceful shutdown complete.")
 }

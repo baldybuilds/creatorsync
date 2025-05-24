@@ -2,7 +2,9 @@ package analytics
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"time"
 
@@ -76,23 +78,60 @@ func (h *Handlers) RegisterRoutes(app *fiber.App) {
 func (h *Handlers) GetDashboardOverview(c *fiber.Ctx) error {
 	user, err := clerk.GetUserFromContext(c)
 	if err != nil {
+		log.Printf("❌ Authentication failed in GetDashboardOverview: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
 	}
 	userID := user.ID
 
+	log.Printf("🔍 Dashboard overview request for user %s", userID)
+
+	// Ensure user exists in database before proceeding
+	analyticsRepo := NewRepository(h.service.(*service).db)
+	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), userID)
+	if err != nil {
+		log.Printf("❌ Error checking user existence for %s: %v", userID, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to verify user account",
+		})
+	}
+
+	if existingUser == nil {
+		log.Printf("⚠️ User %s not found in database, attempting to create basic record", userID)
+
+		// Create minimal user record for cross-environment compatibility
+		user := &User{
+			ID:          userID,
+			ClerkUserID: userID,
+			Username:    fmt.Sprintf("user_%s", userID[len(userID)-10:]), // Use last 10 chars of ID
+			DisplayName: "User",
+			Email:       "",
+		}
+
+		if err := analyticsRepo.CreateOrUpdateUser(c.Context(), user); err != nil {
+			log.Printf("❌ Failed to create user record for %s: %v", userID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to initialize user account",
+			})
+		}
+
+		log.Printf("✅ Created basic user record for %s", userID)
+	}
+
 	// Check if we need to trigger automatic data collection
 	h.triggerAutoDataCollectionIfNeeded(userID)
 
 	overview, err := h.service.GetDashboardOverview(c.Context(), userID)
 	if err != nil {
-		log.Printf("Error getting dashboard overview for user %s: %v", userID, err)
+		log.Printf("❌ Error getting dashboard overview for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to get dashboard overview",
+			"error":   "Failed to get dashboard overview",
+			"details": err.Error(),
 		})
 	}
 
+	log.Printf("✅ Dashboard overview response for user %s", userID)
 	return c.JSON(overview)
 }
 
@@ -148,12 +187,45 @@ func (h *Handlers) GetDetailedAnalytics(c *fiber.Ctx) error {
 func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 	userID, err := h.getUserID(c)
 	if err != nil {
+		log.Printf("❌ Authentication failed in GetEnhancedAnalytics: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
 	}
 
 	log.Printf("🔍 Enhanced analytics request for user %s", userID)
+
+	// Ensure user exists in database before proceeding
+	analyticsRepo := NewRepository(h.service.(*service).db)
+	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), userID)
+	if err != nil {
+		log.Printf("❌ Error checking user existence for %s: %v", userID, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to verify user account",
+		})
+	}
+
+	if existingUser == nil {
+		log.Printf("⚠️ User %s not found in database, attempting to create basic record", userID)
+
+		// Create minimal user record for cross-environment compatibility
+		user := &User{
+			ID:          userID,
+			ClerkUserID: userID,
+			Username:    fmt.Sprintf("user_%s", userID[len(userID)-10:]), // Use last 10 chars of ID
+			DisplayName: "User",
+			Email:       "",
+		}
+
+		if err := analyticsRepo.CreateOrUpdateUser(c.Context(), user); err != nil {
+			log.Printf("❌ Failed to create user record for %s: %v", userID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to initialize user account",
+			})
+		}
+
+		log.Printf("✅ Created basic user record for %s", userID)
+	}
 
 	// Check if we need to trigger automatic data collection
 	h.triggerAutoDataCollectionIfNeeded(userID)
@@ -170,7 +242,8 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 	if err != nil {
 		log.Printf("❌ Error getting enhanced analytics for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to get enhanced analytics",
+			"error":   "Failed to get enhanced analytics",
+			"details": err.Error(),
 		})
 	}
 
@@ -336,7 +409,7 @@ func (h *Handlers) triggerAutoDataCollectionIfNeeded(userID string) {
 	}
 }
 
-// GetDataStatus returns debug information about user's analytics data
+// GetDataStatus returns debug information about data and system status
 func (h *Handlers) GetDataStatus(c *fiber.Ctx) error {
 	userID, err := h.getUserID(c)
 	if err != nil {
@@ -345,19 +418,52 @@ func (h *Handlers) GetDataStatus(c *fiber.Ctx) error {
 		})
 	}
 
-	hasData, lastUpdate, err := h.service.CheckUserAnalyticsData(c.Context(), userID)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+	status := fiber.Map{
+		"user_id":         userID,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+		"environment":     os.Getenv("APP_ENV"),
+		"database_health": "",
+		"user_exists":     false,
+		"analytics_data": fiber.Map{
+			"has_channel_data": false,
+			"has_video_data":   false,
+			"last_update":      nil,
+		},
+		"errors": []string{},
 	}
 
-	return c.JSON(fiber.Map{
-		"user_id":     userID,
-		"has_data":    hasData,
-		"last_update": lastUpdate,
-		"timestamp":   time.Now().Unix(),
-	})
+	// Check database health
+	if health := h.service.(*service).db.Health(); health["status"] == "up" {
+		status["database_health"] = "healthy"
+	} else {
+		status["database_health"] = "unhealthy"
+		if errorMsg, exists := health["error"]; exists {
+			status["errors"] = append(status["errors"].([]string), fmt.Sprintf("Database: %v", errorMsg))
+		}
+	}
+
+	// Check if user exists
+	analyticsRepo := NewRepository(h.service.(*service).db)
+	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), userID)
+	if err != nil {
+		status["errors"] = append(status["errors"].([]string), fmt.Sprintf("User lookup failed: %v", err))
+	} else if existingUser != nil {
+		status["user_exists"] = true
+	}
+
+	// Check analytics data
+	hasData, lastUpdate, err := h.service.CheckUserAnalyticsData(c.Context(), userID)
+	if err != nil {
+		status["errors"] = append(status["errors"].([]string), fmt.Sprintf("Analytics data check failed: %v", err))
+	} else {
+		analyticsData := status["analytics_data"].(fiber.Map)
+		analyticsData["has_data"] = hasData
+		if lastUpdate != nil {
+			analyticsData["last_update"] = lastUpdate.Format(time.RFC3339)
+		}
+	}
+
+	return c.JSON(status)
 }
 
 // HealthCheck returns the health status of the analytics service

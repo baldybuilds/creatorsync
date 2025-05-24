@@ -355,8 +355,13 @@ export default function AnalyticsPage() {
             const token = await getToken();
             const apiBaseUrl = getApiBaseUrl();
 
+            console.log('🔍 Fetching analytics from:', apiBaseUrl);
+            console.log('🔍 Environment:', process.env.NEXT_PUBLIC_APP_ENV);
+            console.log('🔍 Hostname:', typeof window !== 'undefined' ? window.location.hostname : 'server');
+
             // Sync user to ensure they exist in the database (especially for staging)
             try {
+                console.log('🔄 Syncing user...');
                 await fetch(`${apiBaseUrl}/api/user/sync`, {
                     method: 'POST',
                     headers: {
@@ -364,10 +369,12 @@ export default function AnalyticsPage() {
                         'Content-Type': 'application/json',
                     },
                 });
+                console.log('✅ User sync completed');
             } catch (syncError) {
-                console.warn('User sync failed, continuing anyway:', syncError);
+                console.warn('⚠️ User sync failed, continuing anyway:', syncError);
             }
 
+            console.log('📊 Fetching enhanced analytics...');
             const response = await fetch(`${apiBaseUrl}/api/analytics/enhanced?days=${timeRange}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -375,17 +382,39 @@ export default function AnalyticsPage() {
                 },
             });
 
+            console.log('📊 Analytics response status:', response.status);
+            console.log('📊 Analytics response headers:', Object.fromEntries(response.headers.entries()));
+
             if (response.ok) {
                 const data = await response.json();
                 console.log('📊 Analytics data received:', data);
                 console.log('📊 Overview data:', data.overview);
                 setAnalytics(data);
             } else {
-                console.error('Failed to fetch analytics:', response.status);
+                const errorText = await response.text();
+                console.error('❌ Failed to fetch analytics:', response.status, errorText);
+                
+                // Try to get debug information
+                try {
+                    console.log('🔍 Fetching debug information...');
+                    const debugResponse = await fetch(`${apiBaseUrl}/api/analytics/debug/data-status`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    
+                    if (debugResponse.ok) {
+                        const debugData = await debugResponse.json();
+                        console.log('🔍 Debug data:', debugData);
+                    }
+                } catch (debugError) {
+                    console.warn('⚠️ Could not fetch debug information:', debugError);
+                }
             }
 
         } catch (error) {
-            console.error('Error fetching analytics data:', error);
+            console.error('❌ Error fetching analytics data:', error);
         } finally {
             setLoading(false);
         }
@@ -427,8 +456,6 @@ export default function AnalyticsPage() {
             console.error('❌ Error triggering manual collection:', error);
         }
     };
-
-
 
     useEffect(() => {
         fetchAnalyticsData();

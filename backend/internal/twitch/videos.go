@@ -54,7 +54,7 @@ func (c *Client) GetVideosByID(ctx context.Context, userAccessToken string, vide
 	if len(videoIDs) == 0 {
 		return nil, fmt.Errorf("no video IDs provided")
 	}
-	
+
 	if len(videoIDs) > 100 {
 		return nil, fmt.Errorf("too many video IDs provided, maximum is 100")
 	}

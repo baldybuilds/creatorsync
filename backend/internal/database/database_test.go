@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,24 +51,40 @@ func mustStartPostgresContainer() (func(context.Context, ...testcontainers.Termi
 
 	os.Setenv("POSTGRES_DB_HOST", dbHost)
 	os.Setenv("POSTGRES_DB_PORT", dbPort.Port())
+	// Disable SSL for test containers
+	os.Setenv("POSTGRES_SSL_MODE", "disable")
 
 	return dbContainer.Terminate, err
 }
 
 func TestMain(m *testing.M) {
+	// Check if we should skip integration tests by looking for short flag
+	for _, arg := range os.Args {
+		if strings.Contains(arg, "short") {
+			log.Println("Skipping database integration tests in short mode")
+			os.Exit(0)
+		}
+	}
+
 	teardown, err := mustStartPostgresContainer()
 	if err != nil {
 		log.Fatalf("could not start postgres container: %v", err)
 	}
 
-	m.Run()
+	result := m.Run()
 
 	if teardown != nil && teardown(context.Background()) != nil {
 		log.Fatalf("could not teardown postgres container: %v", err)
 	}
+
+	os.Exit(result)
 }
 
 func TestNew(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping database integration test in short mode")
+	}
+
 	srv := New()
 	if srv == nil {
 		t.Fatal("New() returned nil")
@@ -75,6 +92,10 @@ func TestNew(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping database integration test in short mode")
+	}
+
 	srv := New()
 
 	stats := srv.Health()
@@ -93,6 +114,10 @@ func TestHealth(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping database integration test in short mode")
+	}
+
 	srv := New()
 
 	if srv.Close() != nil {

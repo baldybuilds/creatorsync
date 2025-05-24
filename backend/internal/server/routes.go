@@ -59,7 +59,6 @@ func (s *FiberServer) RegisterFiberRoutes() {
 	api.Get("/user/profile", s.getUserProfileHandler)
 	api.Post("/user/sync", s.syncUserHandler)
 
-
 	// Register Twitch routes
 	s.registerTwitchRoutes(api)
 }
@@ -169,7 +168,7 @@ func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID str
 	if err != nil {
 		// If Clerk user doesn't exist (e.g., cross-environment user ID), create basic record
 		log.Printf("⚠️ Clerk user %s not found in current environment, creating basic user record: %v", userID, err)
-		
+
 		// Create minimal user record with just the Clerk ID
 		user := &analytics.User{
 			ID:          userID,

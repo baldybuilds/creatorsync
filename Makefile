@@ -67,4 +67,125 @@ watch:
 		fi; \
 	fi
 
-.PHONY: all build run test clean watch docker-run docker-down itest
+# CreatorSync Development Tools
+
+# Docker & Database
+.PHONY: docker-run docker-down docker-logs docker-clean
+docker-run:
+	docker compose up -d
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f
+
+docker-clean:
+	docker compose down -v --remove-orphans
+
+# Database Migrations
+.PHONY: migrate-up migrate-down migrate-reset
+migrate-up:
+	cd backend && go run cmd/migrate/main.go up
+
+migrate-down:
+	cd backend && go run cmd/migrate/main.go down
+
+migrate-reset: migrate-down migrate-up
+
+# Testing (New Tiered Approach)
+.PHONY: test-fast test-full test-integration test-backend test-frontend
+test-fast:
+	npm run test:fast
+
+test-full:
+	npm run test:full
+
+test-integration:
+	npm run test:integration
+
+test-backend:
+	npm run test:backend:integration
+
+test-frontend:
+	npm run test:frontend:full
+
+# Development
+.PHONY: run run-backend run-frontend dev
+run: docker-run
+	@echo "Starting backend and frontend in parallel..."
+	@make run-backend & make run-frontend & wait
+
+run-backend:
+	cd backend && go run cmd/api/main.go
+
+run-frontend:
+	cd frontend && npm run dev
+
+dev: run
+
+# Build
+.PHONY: build build-backend build-frontend
+build: build-backend build-frontend
+
+build-backend:
+	cd backend && go build -o bin/api cmd/api/main.go
+
+build-frontend:
+	cd frontend && npm run build
+
+# Production
+.PHONY: prod start-prod
+prod: build docker-run
+	cd backend && ./bin/api
+
+start-prod:
+	cd frontend && npm start
+
+# Staging Validation
+.PHONY: staging-check staging-deploy
+staging-check:
+	@echo "🔍 Running comprehensive validation before staging..."
+	npm run test:integration
+	@echo "✅ All tests passed! Safe to deploy to staging."
+
+staging-deploy: staging-check
+	@echo "🚀 Deploying to staging..."
+	git push origin staging
+
+# Clean up
+.PHONY: clean clean-deps
+clean:
+	rm -rf backend/bin/
+	rm -rf frontend/.next/
+	rm -rf frontend/out/
+
+clean-deps:
+	rm -rf node_modules/
+	rm -rf frontend/node_modules/
+	cd backend && go clean -modcache
+
+# Help
+.PHONY: help
+help:
+	@echo "CreatorSync Development Commands:"
+	@echo ""
+	@echo "🐳 Docker & Database:"
+	@echo "  make docker-run     - Start PostgreSQL container"
+	@echo "  make docker-down    - Stop PostgreSQL container"
+	@echo "  make migrate-up     - Run database migrations"
+	@echo ""
+	@echo "🧪 Testing:"
+	@echo "  make test-fast      - Quick tests (pre-commit)"
+	@echo "  make test-full      - Comprehensive tests"
+	@echo "  make test-integration - Full integration tests (pre-push)"
+	@echo ""
+	@echo "🚀 Development:"
+	@echo "  make dev           - Start both backend and frontend"
+	@echo "  make build         - Build both projects"
+	@echo ""
+	@echo "📊 Staging:"
+	@echo "  make staging-check - Validate before staging deployment"
+	@echo "  make staging-deploy - Deploy to staging after validation"
+
+.PHONY: all build test clean watch docker-run docker-down itest

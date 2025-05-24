@@ -12,7 +12,7 @@ func GetTwitchVideosHandler(c *fiber.Ctx) error {
 	if err != nil {
 		return helpers.HandleTwitchError(c, err)
 	}
-	
+
 	twitchUserID := twitchContext.UserID
 	twitchToken := twitchContext.AccessToken
 	twitchClient := twitchContext.Client

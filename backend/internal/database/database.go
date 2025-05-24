@@ -23,7 +23,7 @@ type Service interface {
 }
 
 type service struct {
-	db     *sql.DB
+	db      *sql.DB
 	connStr string
 }
 
@@ -45,8 +45,14 @@ func New() Service {
 			schema = "public"
 		}
 
-		connStr = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=require&search_path=%s",
-			username, password, host, port, database, schema)
+		// Configure SSL mode (defaults to require for production)
+		sslMode := os.Getenv("POSTGRES_SSL_MODE")
+		if sslMode == "" {
+			sslMode = "require"
+		}
+
+		connStr = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s&search_path=%s",
+			username, password, host, port, database, sslMode, schema)
 		log.Println("Using individual environment variables for connection")
 	}
 
@@ -64,7 +70,7 @@ func New() Service {
 	// Test the connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	if err := db.PingContext(ctx); err != nil {
 		log.Printf("Failed to ping database: %v", err)
 		log.Fatal(err)
@@ -73,7 +79,7 @@ func New() Service {
 	log.Println("Database connection established successfully")
 
 	return &service{
-		db:     db,
+		db:      db,
 		connStr: connStr,
 	}
 }
@@ -148,38 +154,38 @@ func (s *service) RunMigrations() error {
 func (s *service) CheckConnection() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	
+
 	return s.db.PingContext(ctx)
 }
 
 func (s *service) Reconnect() error {
 	log.Println("Attempting to reconnect to database...")
-	
+
 	// Close the existing connection
 	if s.db != nil {
 		s.db.Close()
 	}
-	
+
 	// Create a new connection
 	db, err := sql.Open("pgx", s.connStr)
 	if err != nil {
 		return fmt.Errorf("failed to reconnect to database: %w", err)
 	}
-	
+
 	// Configure connection pool settings
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	db.SetConnMaxIdleTime(30 * time.Second)
-	
+
 	// Test the new connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("failed to ping database after reconnect: %w", err)
 	}
-	
+
 	s.db = db
 	log.Println("Database reconnected successfully")
 	return nil

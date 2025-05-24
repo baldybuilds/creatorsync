@@ -1,0 +1,19 @@
+{
+    "name": "creatorsync",
+    "private": true,
+    "scripts": {
+        "test:fast": "npm run test:frontend:fast && npm run test:backend:fast",
+        "test:full": "npm run test:frontend:full && npm run test:backend:full",
+        "test:integration": "npm run test:frontend:full && npm run test:backend:integration",
+        "test:frontend:fast": "cd frontend && npm run lint",
+        "test:frontend:full": "cd frontend && npm run lint && npm run build",
+        "test:backend:fast": "cd backend && go fmt ./... && go vet ./... && go test -short ./...",
+        "test:backend:integration": "cd backend && go test ./... -v",
+        "test:backend:unit": "cd backend && go test -short ./...",
+        "prepare": "husky install"
+    },
+    "devDependencies": {
+        "husky": "^8.0.3",
+        "lint-staged": "^15.2.0"
+    }
+}

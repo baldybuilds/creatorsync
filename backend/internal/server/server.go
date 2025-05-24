@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/gofiber/fiber/v2"
@@ -15,8 +17,9 @@ import (
 type FiberServer struct {
 	*fiber.App
 
-	db                database.Service
-	analyticsHandlers *analytics.Handlers
+	db                      database.Service
+	analyticsHandlers       *analytics.Handlers
+	backgroundCollectionMgr *analytics.BackgroundCollectionManager
 }
 
 func New() (*FiberServer, error) {
@@ -49,9 +52,35 @@ func New() (*FiberServer, error) {
 			ServerHeader: "creatorsync",
 			AppName:      "creatorsync",
 		}),
-		db:                db,
-		analyticsHandlers: analyticsHandlers,
+		db:                      db,
+		analyticsHandlers:       analyticsHandlers,
+		backgroundCollectionMgr: backgroundMgr,
 	}
 
 	return server, nil
+}
+
+// StartBackgroundServices starts all background services like analytics collection
+func (s *FiberServer) StartBackgroundServices() error {
+	log.Printf("🚀 Starting background analytics collection...")
+
+	ctx := context.Background()
+	if err := s.backgroundCollectionMgr.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start background collection manager: %w", err)
+	}
+
+	log.Printf("✅ Background analytics collection started successfully")
+	return nil
+}
+
+// StopBackgroundServices stops all background services
+func (s *FiberServer) StopBackgroundServices() error {
+	log.Printf("🛑 Stopping background services...")
+
+	if err := s.backgroundCollectionMgr.Stop(); err != nil {
+		return fmt.Errorf("failed to stop background collection manager: %w", err)
+	}
+
+	log.Printf("✅ Background services stopped")
+	return nil
 }

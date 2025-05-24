@@ -23,6 +23,11 @@ func gracefulShutdown(fiberServer *server.FiberServer, done chan bool) {
 
 	log.Println("shutting down gracefully, press Ctrl+C again to force")
 
+	// Stop background services first
+	if err := fiberServer.StopBackgroundServices(); err != nil {
+		log.Printf("Error stopping background services: %v", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := fiberServer.ShutdownWithContext(ctx); err != nil {
@@ -68,6 +73,11 @@ func main() {
 	server, err := server.New()
 	if err != nil {
 		log.Fatalf("❌ Failed to initialize server: %v", err)
+	}
+
+	// Start background services (analytics collection)
+	if err := server.StartBackgroundServices(); err != nil {
+		log.Fatalf("❌ Failed to start background services: %v", err)
 	}
 
 	server.RegisterFiberRoutes()

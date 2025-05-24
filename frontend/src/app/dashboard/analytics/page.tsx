@@ -390,6 +390,7 @@ export default function AnalyticsPage() {
                 console.log('📊 Analytics data received:', data);
                 console.log('📊 Overview data:', data.overview);
                 setAnalytics(data);
+                setLoading(false);
             } else {
                 const errorText = await response.text();
                 console.error('❌ Failed to fetch analytics:', response.status, errorText);
@@ -411,14 +412,21 @@ export default function AnalyticsPage() {
                 } catch (debugError) {
                     console.warn('⚠️ Could not fetch debug information:', debugError);
                 }
+
+                // If no enhanced data and auto-collection was triggered, show that we're collecting
+                if (!analytics) {
+                    setLoading(false);
+                    // Show partial data with collection message
+                } else {
+                    setLoading(false);
+                }
             }
 
         } catch (error) {
             console.error('❌ Error fetching analytics data:', error);
-        } finally {
             setLoading(false);
         }
-    }, [isLoaded, isSignedIn, getToken, timeRange]);
+    }, [isLoaded, isSignedIn, getToken, timeRange, analytics]);
 
     const handleRefresh = async () => {
         setRefreshing(true);
@@ -433,7 +441,8 @@ export default function AnalyticsPage() {
             const token = await getToken();
             const apiBaseUrl = getApiBaseUrl();
 
-            console.log('🔄 Triggering manual data collection...');
+            console.log('🔄 Manually triggering data collection...');
+            
             const response = await fetch(`${apiBaseUrl}/api/analytics/collect`, {
                 method: 'POST',
                 headers: {
@@ -443,17 +452,16 @@ export default function AnalyticsPage() {
             });
 
             if (response.ok) {
-                const result = await response.json();
-                console.log('✅ Manual data collection triggered:', result);
-                // Wait a bit then refresh the analytics
-                setTimeout(async () => {
-                    await fetchAnalyticsData();
-                }, 3000);
+                console.log('✅ Data collection triggered successfully');
+                // Refresh data after a short delay to allow collection to start
+                setTimeout(() => {
+                    fetchAnalyticsData();
+                }, 2000);
             } else {
-                console.error('❌ Failed to trigger manual collection:', response.status);
+                console.error('❌ Failed to trigger data collection:', response.statusText);
             }
         } catch (error) {
-            console.error('❌ Error triggering manual collection:', error);
+            console.error('❌ Error triggering data collection:', error);
         }
     };
 

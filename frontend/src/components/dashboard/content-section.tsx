@@ -93,9 +93,8 @@ export function ContentSection() {
                             'Content-Type': 'application/json',
                         },
                     });
-                } catch (syncError) {
-                    console.warn('User sync failed, continuing anyway:', syncError);
-                    // Don't throw here, continue with the rest of the logic
+                } catch {
+                    // Continue anyway if sync fails
                 }
 
                 // Fetch videos (broadcasts, highlights, uploads)

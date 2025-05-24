@@ -257,17 +257,47 @@ func (s *FiberServer) syncUserHandler(c *fiber.Ctx) error {
 		})
 	}
 
+	// Check if this is a new user by seeing if they exist in our database
+	analyticsRepo := analytics.NewRepository(s.db)
+	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), user.ID)
+	isNewUser := (err != nil || existingUser == nil)
+
 	// Ensure user exists in our database
 	if err := s.ensureUserExistsInDatabase(c.Context(), user.ID); err != nil {
-		log.Printf("Failed to sync user %s: %v", user.ID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fmt.Sprintf("Failed to sync user data: %v", err),
 		})
 	}
 
+	// If this is a new user with a Twitch connection, trigger their first data collection
+	if isNewUser {
+		// Check if user has Twitch connected via Clerk
+		clerkUser, clerkErr := clerk.GetUserByID(c.Context(), user.ID)
+		if clerkErr == nil {
+			hasTwitch := false
+			for _, account := range clerkUser.ExternalAccounts {
+				if account.Provider == "oauth_twitch" {
+					hasTwitch = true
+					break
+				}
+			}
+
+			if hasTwitch {
+				// Trigger first-time data collection in background
+				go func() {
+					// Get the background collection manager from the server
+					if s.backgroundCollectionMgr != nil {
+						s.backgroundCollectionMgr.TriggerUserCollection(user.ID)
+					}
+				}()
+			}
+		}
+	}
+
 	return c.JSON(fiber.Map{
-		"message": "User synced successfully",
-		"user_id": user.ID,
+		"message":     "User synced successfully",
+		"user_id":     user.ID,
+		"is_new_user": isNewUser,
 	})
 }
 

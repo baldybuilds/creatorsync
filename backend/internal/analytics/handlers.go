@@ -1,7 +1,6 @@
 package analytics
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -78,60 +77,46 @@ func (h *Handlers) RegisterRoutes(app *fiber.App) {
 func (h *Handlers) GetDashboardOverview(c *fiber.Ctx) error {
 	user, err := clerk.GetUserFromContext(c)
 	if err != nil {
-		log.Printf("❌ Authentication failed in GetDashboardOverview: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
 	}
 	userID := user.ID
 
-	log.Printf("🔍 Dashboard overview request for user %s", userID)
-
 	// Ensure user exists in database before proceeding
 	analyticsRepo := NewRepository(h.service.(*service).db)
 	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), userID)
 	if err != nil {
-		log.Printf("❌ Error checking user existence for %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to verify user account",
 		})
 	}
 
 	if existingUser == nil {
-		log.Printf("⚠️ User %s not found in database, attempting to create basic record", userID)
-
 		// Create minimal user record for cross-environment compatibility
 		user := &User{
 			ID:          userID,
 			ClerkUserID: userID,
-			Username:    fmt.Sprintf("user_%s", userID[len(userID)-10:]), // Use last 10 chars of ID
+			Username:    fmt.Sprintf("user_%s", userID[len(userID)-10:]),
 			DisplayName: "User",
 			Email:       "",
 		}
 
 		if err := analyticsRepo.CreateOrUpdateUser(c.Context(), user); err != nil {
-			log.Printf("❌ Failed to create user record for %s: %v", userID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to initialize user account",
 			})
 		}
-
-		log.Printf("✅ Created basic user record for %s", userID)
 	}
-
-	// Check if we need to trigger automatic data collection
-	h.triggerAutoDataCollectionIfNeeded(userID)
 
 	overview, err := h.service.GetDashboardOverview(c.Context(), userID)
 	if err != nil {
-		log.Printf("❌ Error getting dashboard overview for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":   "Failed to get dashboard overview",
 			"details": err.Error(),
 		})
 	}
 
-	log.Printf("✅ Dashboard overview response for user %s", userID)
 	return c.JSON(overview)
 }
 
@@ -187,48 +172,36 @@ func (h *Handlers) GetDetailedAnalytics(c *fiber.Ctx) error {
 func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 	userID, err := h.getUserID(c)
 	if err != nil {
-		log.Printf("❌ Authentication failed in GetEnhancedAnalytics: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
 	}
 
-	log.Printf("🔍 Enhanced analytics request for user %s", userID)
-
 	// Ensure user exists in database before proceeding
 	analyticsRepo := NewRepository(h.service.(*service).db)
 	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), userID)
 	if err != nil {
-		log.Printf("❌ Error checking user existence for %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to verify user account",
 		})
 	}
 
 	if existingUser == nil {
-		log.Printf("⚠️ User %s not found in database, attempting to create basic record", userID)
-
 		// Create minimal user record for cross-environment compatibility
 		user := &User{
 			ID:          userID,
 			ClerkUserID: userID,
-			Username:    fmt.Sprintf("user_%s", userID[len(userID)-10:]), // Use last 10 chars of ID
+			Username:    fmt.Sprintf("user_%s", userID[len(userID)-10:]),
 			DisplayName: "User",
 			Email:       "",
 		}
 
 		if err := analyticsRepo.CreateOrUpdateUser(c.Context(), user); err != nil {
-			log.Printf("❌ Failed to create user record for %s: %v", userID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to initialize user account",
 			})
 		}
-
-		log.Printf("✅ Created basic user record for %s", userID)
 	}
-
-	// Check if we need to trigger automatic data collection
-	h.triggerAutoDataCollectionIfNeeded(userID)
 
 	// Get days parameter (default to 30)
 	daysStr := c.Query("days", "30")
@@ -237,17 +210,14 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		days = 30
 	}
 
-	log.Printf("📊 Fetching enhanced analytics for user %s (days: %d)", userID, days)
 	analytics, err := h.service.GetEnhancedAnalytics(c.Context(), userID, days)
 	if err != nil {
-		log.Printf("❌ Error getting enhanced analytics for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":   "Failed to get enhanced analytics",
 			"details": err.Error(),
 		})
 	}
 
-	log.Printf("✅ Enhanced analytics response for user %s: %+v", userID, analytics.Overview)
 	return c.JSON(analytics)
 }
 
@@ -357,7 +327,6 @@ func (h *Handlers) GetAnalyticsJobs(c *fiber.Ctx) error {
 
 	jobs, err := h.service.GetAnalyticsJobs(c.Context(), userID, limit)
 	if err != nil {
-		log.Printf("Error getting analytics jobs for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to get analytics jobs",
 		})
@@ -368,45 +337,6 @@ func (h *Handlers) GetAnalyticsJobs(c *fiber.Ctx) error {
 		"user_id":   userID,
 		"timestamp": time.Now().Unix(),
 	})
-}
-
-// triggerAutoDataCollectionIfNeeded checks if we should automatically collect data for a user
-func (h *Handlers) triggerAutoDataCollectionIfNeeded(userID string) {
-	log.Printf("🔍 Checking if data collection needed for user %s", userID)
-
-	// Check if user has any analytics data
-	hasData, lastUpdate, err := h.service.CheckUserAnalyticsData(context.Background(), userID)
-	if err != nil {
-		log.Printf("❌ Error checking analytics data for user %s: %v", userID, err)
-		return
-	}
-
-	log.Printf("📊 Data check for user %s: hasData=%v, lastUpdate=%v", userID, hasData, lastUpdate)
-
-	shouldCollect := false
-	reason := ""
-
-	if !hasData {
-		// No data exists - trigger collection for new users
-		shouldCollect = true
-		reason = "no existing data"
-	} else if lastUpdate != nil {
-		// Check if data is stale (older than 6 hours)
-		staleThreshold := time.Now().Add(-6 * time.Hour)
-		if lastUpdate.Before(staleThreshold) {
-			shouldCollect = true
-			reason = "data is stale (older than 6 hours)"
-		} else {
-			log.Printf("✅ Data is fresh for user %s (last update: %v)", userID, lastUpdate)
-		}
-	}
-
-	if shouldCollect {
-		log.Printf("🔄 Auto-triggering data collection for user %s: %s", userID, reason)
-		h.backgroundCollectionMgr.TriggerUserCollection(userID)
-	} else {
-		log.Printf("⏭️ No data collection needed for user %s", userID)
-	}
 }
 
 // GetDataStatus returns debug information about data and system status

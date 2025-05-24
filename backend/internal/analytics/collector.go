@@ -169,7 +169,7 @@ func (dc *dataCollector) CollectVideoData(ctx context.Context, userID string) er
 	var allVideos []twitch.VideoInfo
 	limit := 100 // Maximum per request
 	totalVideosFetched := 0
-	maxVideos := 1000 // Reasonable limit to avoid infinite loops
+	maxVideos := 200 // Reasonable limit to avoid infinite loops
 
 	// Fetch videos with pagination
 	cursor := ""
@@ -236,7 +236,7 @@ func (dc *dataCollector) CollectVideoData(ctx context.Context, userID string) er
 	// Now collect clips
 	log.Printf("Fetching clips for user %s (Twitch ID: %s)", userID, twitchUserID)
 
-	clipLimit := 1000 // Increase to capture more historical clips
+	clipLimit := 100 // Increase to capture more historical clips
 	clips, err := dc.twitchClient.GetClips(ctx, twitchToken, twitchUserID, clipLimit)
 	clipsSaved := 0
 

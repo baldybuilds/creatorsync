@@ -154,41 +154,52 @@ func (dc *dataCollector) CollectVideoData(ctx context.Context, userID string) er
 		return err
 	}
 
-	// Collect VODs
-	log.Printf("Fetching VODs for user %s", userID)
-	vods, err := dc.twitchClient.GetVideos(twitchToken, "archive", 50)
+	// First, get the Twitch user ID from user info
+	userInfo, err := dc.twitchClient.GetUserInfo(twitchToken)
 	if err != nil {
-		log.Printf("Failed to get VODs: %v", err)
-	} else {
-		log.Printf("Found %d VODs for user %s", len(vods), userID)
-		videosSaved := 0
-		for _, vod := range vods {
-			// Convert duration string to seconds (simplified)
-			durationSeconds := 0
-			// TODO: Parse duration string properly (e.g., "1h23m45s" -> seconds)
-
-			video := &VideoAnalytics{
-				UserID:       userID,
-				VideoID:      vod.ID,
-				Title:        vod.Title,
-				VideoType:    "vod",
-				Duration:     durationSeconds,
-				ViewCount:    vod.ViewCount,
-				ThumbnailURL: vod.ThumbnailURL,
-				PublishedAt:  &vod.PublishedAt,
-			}
-
-			if err := dc.repo.SaveVideoAnalytics(ctx, video); err != nil {
-				log.Printf("Failed to save video analytics for VOD %s (%s): %v", vod.ID, vod.Title, err)
-			} else {
-				videosSaved++
-				log.Printf("Saved video: %s (ID: %s, Views: %d)", vod.Title, vod.ID, vod.ViewCount)
-			}
-		}
-		log.Printf("Successfully saved %d out of %d VODs for user %s", videosSaved, len(vods), userID)
+		job.ErrorMessage = fmt.Sprintf("Failed to get user info: %v", err)
+		return err
 	}
 
-	log.Printf("Successfully completed video data collection for user %s", userID)
+	twitchUserID := userInfo.ID
+
+	// Collect videos using the same method as the content page
+	log.Printf("Fetching videos for user %s (Twitch ID: %s)", userID, twitchUserID)
+	videos, _, err := dc.twitchClient.GetUserVideos(ctx, twitchToken, twitchUserID, 50)
+	if err != nil {
+		job.ErrorMessage = fmt.Sprintf("Failed to get videos: %v", err)
+		log.Printf("Failed to get videos for user %s: %v", userID, err)
+		return err
+	}
+
+	log.Printf("Found %d videos for user %s", len(videos), userID)
+	videosSaved := 0
+
+	for _, video := range videos {
+		// Parse duration string to seconds (simplified - you can improve this later)
+		durationSeconds := 0
+		// TODO: Parse duration string properly (e.g., "1h23m45s" -> seconds)
+
+		videoAnalytics := &VideoAnalytics{
+			UserID:       userID,
+			VideoID:      video.ID,
+			Title:        video.Title,
+			VideoType:    video.Type, // Use the type from the API response
+			Duration:     durationSeconds,
+			ViewCount:    video.ViewCount,
+			ThumbnailURL: video.ThumbnailURL,
+			PublishedAt:  &video.PublishedAt,
+		}
+
+		if err := dc.repo.SaveVideoAnalytics(ctx, videoAnalytics); err != nil {
+			log.Printf("Failed to save video analytics for video %s (%s): %v", video.ID, video.Title, err)
+		} else {
+			videosSaved++
+			log.Printf("Saved video: %s (ID: %s, Type: %s, Views: %d)", video.Title, video.ID, video.Type, video.ViewCount)
+		}
+	}
+
+	log.Printf("Successfully saved %d out of %d videos for user %s", videosSaved, len(videos), userID)
 	return nil
 }
 

@@ -1,0 +1,21 @@
+services:
+  postgres_local:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: creatorsync_local
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: localdev123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_local_data:/var/lib/postgresql/data
+    # Clear labels that this is for local development only
+    labels:
+      - "creatorsync.env=local"
+      - "creatorsync.purpose=development-only"
+
+volumes:
+  postgres_local_data:
+    labels:
+      - "creatorsync.env=local" 

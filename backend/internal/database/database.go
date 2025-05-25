@@ -62,14 +62,34 @@ func New() Service {
 	}
 
 	// Configure connection pool settings based on environment
-	env := os.Getenv("ENVIRONMENT")
-	if env == "staging" || env == "production" {
-		// More conservative settings for cloud environments to prevent connection exhaustion
-		db.SetMaxOpenConns(10)                  // Reduced from 25 to prevent pool exhaustion
-		db.SetMaxIdleConns(3)                   // Reduced from 5 for staging/production
-		db.SetConnMaxLifetime(2 * time.Minute)  // Shorter lifetime to cycle connections faster
-		db.SetConnMaxIdleTime(15 * time.Second) // Reduced idle time
-		log.Printf("Applied %s environment database pool settings (MaxOpen: 10, MaxIdle: 3)", env)
+	env := os.Getenv("APP_ENV")
+	environment := os.Getenv("ENVIRONMENT")
+	databaseURL := os.Getenv("DATABASE_URL")
+
+	// Improved environment detection
+	isStaging := env == "staging" || environment == "staging" ||
+		env == "dev" || environment == "dev" ||
+		(databaseURL != "" && (env != "production" && environment != "production"))
+
+	isProduction := env == "production" || environment == "production"
+
+	log.Printf("🌍 Database Environment Detection: APP_ENV=%s, ENVIRONMENT=%s, DATABASE_URL=%t",
+		env, environment, databaseURL != "")
+
+	if isProduction {
+		// Production settings - most conservative
+		db.SetMaxOpenConns(8)
+		db.SetMaxIdleConns(2)
+		db.SetConnMaxLifetime(1 * time.Minute)
+		db.SetConnMaxIdleTime(10 * time.Second)
+		log.Printf("Applied production database pool settings (MaxOpen: 8, MaxIdle: 2)")
+	} else if isStaging {
+		// Staging settings - conservative for cloud
+		db.SetMaxOpenConns(10)
+		db.SetMaxIdleConns(3)
+		db.SetConnMaxLifetime(2 * time.Minute)
+		db.SetConnMaxIdleTime(15 * time.Second)
+		log.Printf("Applied staging database pool settings (MaxOpen: 10, MaxIdle: 3)")
 	} else {
 		// Development settings - more permissive
 		db.SetMaxOpenConns(15)
@@ -193,21 +213,41 @@ func (s *service) Reconnect() error {
 	}
 
 	// Configure connection pool settings based on environment
-	env := os.Getenv("ENVIRONMENT")
-	if env == "staging" || env == "production" {
-		// More conservative settings for cloud environments
+	env := os.Getenv("APP_ENV")
+	environment := os.Getenv("ENVIRONMENT")
+	databaseURL := os.Getenv("DATABASE_URL")
+
+	// Improved environment detection
+	isStaging := env == "staging" || environment == "staging" ||
+		env == "dev" || environment == "dev" ||
+		(databaseURL != "" && (env != "production" && environment != "production"))
+
+	isProduction := env == "production" || environment == "production"
+
+	log.Printf("🌍 Database Environment Detection: APP_ENV=%s, ENVIRONMENT=%s, DATABASE_URL=%t",
+		env, environment, databaseURL != "")
+
+	if isProduction {
+		// Production settings - most conservative
+		db.SetMaxOpenConns(8)
+		db.SetMaxIdleConns(2)
+		db.SetConnMaxLifetime(1 * time.Minute)
+		db.SetConnMaxIdleTime(10 * time.Second)
+		log.Printf("Applied production database pool settings (MaxOpen: 8, MaxIdle: 2)")
+	} else if isStaging {
+		// Staging settings - conservative for cloud
 		db.SetMaxOpenConns(10)
 		db.SetMaxIdleConns(3)
 		db.SetConnMaxLifetime(2 * time.Minute)
 		db.SetConnMaxIdleTime(15 * time.Second)
-		log.Printf("Applied %s environment database pool settings on reconnect", env)
+		log.Printf("Applied staging database pool settings (MaxOpen: 10, MaxIdle: 3)")
 	} else {
-		// Development settings
+		// Development settings - more permissive
 		db.SetMaxOpenConns(15)
 		db.SetMaxIdleConns(5)
 		db.SetConnMaxLifetime(5 * time.Minute)
 		db.SetConnMaxIdleTime(30 * time.Second)
-		log.Printf("Applied development database pool settings on reconnect")
+		log.Printf("Applied development database pool settings (MaxOpen: 15, MaxIdle: 5)")
 	}
 
 	// Test the new connection with retries

@@ -184,10 +184,11 @@ const ContentPerformanceChart = ({
             ...(analytics.recentVideos || [])
         ];
         
+        console.log(`📊 ContentPerformanceChart: Processing ${allContent.length} total videos for ${timeRange} days`);
+        
         // If we don't have video arrays, but have video count in overview, show helpful message
         if (allContent.length === 0 && analytics.overview?.videoCount > 0) {
-            // Instead of mock data, return empty array to show the empty state
-            // The empty state will explain that video details are being processed
+            console.log(`⚠️ ContentPerformanceChart: No video arrays but ${analytics.overview.videoCount} videos in overview`);
             return [];
         }
         
@@ -197,9 +198,13 @@ const ContentPerformanceChart = ({
                 const publishDate = new Date(video.published_at);
                 const daysSincePublish = Math.floor((Date.now() - publishDate.getTime()) / (1000 * 60 * 60 * 24));
                 
-                // Filter by time range
+                console.log(`📹 Video: "${video.title}" published ${daysSincePublish} days ago (${publishDate.toLocaleDateString()})`);
+                
+                // More flexible time range filtering - if no content in range, show all content
                 const timeRangeNum = parseInt(timeRange);
-                if (daysSincePublish <= timeRangeNum) {
+                const shouldInclude = daysSincePublish <= timeRangeNum;
+                
+                if (shouldInclude) {
                     acc.push({
                         id: video.id,
                         title: video.title,
@@ -209,11 +214,41 @@ const ContentPerformanceChart = ({
                         daysSince: daysSincePublish,
                         type: video.video_type.toLowerCase().includes('clip') ? 'clip' : 'broadcast'
                     });
+                    console.log(`✅ Video included: "${video.title}" (${daysSincePublish} days <= ${timeRangeNum})`);
+                } else {
+                    console.log(`❌ Video filtered out: "${video.title}" (${daysSincePublish} days > ${timeRangeNum})`);
                 }
             }
             return acc;
         }, []);
         
+        // If no content in the time range, show the most recent content anyway
+        if (uniqueContent.length === 0 && allContent.length > 0) {
+            console.log(`🔄 No content in ${timeRange} day range, showing most recent content instead`);
+            
+            // Take the 10 most recent videos regardless of date
+            const recentContent = allContent
+                .slice(0, 10)
+                .map(video => {
+                    const publishDate = new Date(video.published_at);
+                    const daysSincePublish = Math.floor((Date.now() - publishDate.getTime()) / (1000 * 60 * 60 * 24));
+                    
+                    return {
+                        id: video.id,
+                        title: video.title,
+                        views: video.view_count,
+                        date: publishDate.getTime(),
+                        displayDate: publishDate.toLocaleDateString(),
+                        daysSince: daysSincePublish,
+                        type: video.video_type.toLowerCase().includes('clip') ? 'clip' : 'broadcast'
+                    };
+                });
+            
+            console.log(`📊 Showing ${recentContent.length} recent videos instead`);
+            return recentContent.sort((a, b) => a.date - b.date);
+        }
+        
+        console.log(`📊 Final content data: ${uniqueContent.length} videos`);
         return uniqueContent.sort((a, b) => a.date - b.date);
     }, [analytics, timeRange]);
 
@@ -321,7 +356,13 @@ const ContentPerformanceChart = ({
                         </div>
                         <div className="text-right">
                             <p className="text-sm text-gray-400">
-                                {contentData.length} pieces of content in last {timeRange} days
+                                {contentData.length} pieces of content 
+                                {contentData.length > 0 && analytics && 
+                                 analytics.topVideos && analytics.recentVideos &&
+                                 (analytics.topVideos.length > 0 || analytics.recentVideos.length > 0) ? 
+                                    ` in last ${timeRange} days` : 
+                                    '(showing recent content)'
+                                }
                             </p>
                         </div>
                     </div>

@@ -42,10 +42,55 @@ func (h *Handlers) getUserID(c *fiber.Ctx) (string, error) {
 	return user.ID, nil
 }
 
+// CORS middleware for analytics routes
+func (h *Handlers) corsMiddleware(c *fiber.Ctx) error {
+	// Add explicit CORS headers for all environments
+	origin := c.Get("Origin")
+	allowedOrigins := []string{
+		"https://dev.creatorsync.app", // Staging
+		"https://creatorsync.app",     // Production
+		"https://www.creatorsync.app", // Production www
+		"http://localhost:3000",       // Local development
+		"http://localhost:5173",       // Local Vite
+		"http://localhost:5174",       // Local Vite alt
+		"http://localhost:8080",       // Local Go server
+	}
+
+	// Check if origin is allowed
+	originAllowed := false
+	for _, allowed := range allowedOrigins {
+		if origin == allowed {
+			originAllowed = true
+			break
+		}
+	}
+
+	if originAllowed {
+		c.Set("Access-Control-Allow-Origin", origin)
+	} else {
+		// Default to localhost for development
+		c.Set("Access-Control-Allow-Origin", "http://localhost:3000")
+	}
+
+	c.Set("Access-Control-Allow-Credentials", "true")
+	c.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS,PATCH")
+	c.Set("Access-Control-Allow-Headers", "Accept,Authorization,Content-Type,X-Requested-With")
+
+	// Handle preflight requests
+	if c.Method() == "OPTIONS" {
+		return c.SendStatus(fiber.StatusOK)
+	}
+
+	return c.Next()
+}
+
 // RegisterRoutes registers all analytics routes
 func (h *Handlers) RegisterRoutes(app *fiber.App) {
 	// Create analytics API group that inherits from main app (with CORS)
 	api := app.Group("/api/analytics")
+
+	// Apply CORS middleware to all analytics routes
+	api.Use(h.corsMiddleware)
 
 	// Add a test endpoint to verify CORS is working
 	api.Get("/cors-test", func(c *fiber.Ctx) error {
@@ -206,12 +251,6 @@ func (h *Handlers) GetDetailedAnalytics(c *fiber.Ctx) error {
 
 // GetEnhancedAnalytics returns video-based analytics for the new dashboard design
 func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
-	// Add explicit CORS headers to ensure they're present even on errors
-	c.Set("Access-Control-Allow-Origin", "https://dev.creatorsync.app")
-	c.Set("Access-Control-Allow-Credentials", "true")
-	c.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS,PATCH")
-	c.Set("Access-Control-Allow-Headers", "Accept,Authorization,Content-Type,X-Requested-With")
-
 	userID, err := h.getUserID(c)
 	if err != nil {
 		log.Printf("❌ GetEnhancedAnalytics: Failed to get user ID: %v", err)

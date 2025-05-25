@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -172,21 +173,30 @@ func (h *Handlers) GetDetailedAnalytics(c *fiber.Ctx) error {
 func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 	userID, err := h.getUserID(c)
 	if err != nil {
+		log.Printf("❌ GetEnhancedAnalytics: Failed to get user ID: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
 	}
 
+	log.Printf("🔍 GetEnhancedAnalytics: Starting for user %s", userID)
+
+	// Create a context with timeout to prevent hanging requests
+	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+	defer cancel()
+
 	// Ensure user exists in database before proceeding
 	analyticsRepo := NewRepository(h.service.(*service).db)
-	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), userID)
+	existingUser, err := analyticsRepo.GetUserByClerkID(ctx, userID)
 	if err != nil {
+		log.Printf("❌ GetEnhancedAnalytics: Failed to check user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to verify user account",
 		})
 	}
 
 	if existingUser == nil {
+		log.Printf("🔍 GetEnhancedAnalytics: User %s doesn't exist, creating minimal record", userID)
 		// Create minimal user record for cross-environment compatibility
 		user := &User{
 			ID:          userID,
@@ -196,11 +206,13 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 			Email:       "",
 		}
 
-		if err := analyticsRepo.CreateOrUpdateUser(c.Context(), user); err != nil {
+		if err := analyticsRepo.CreateOrUpdateUser(ctx, user); err != nil {
+			log.Printf("❌ GetEnhancedAnalytics: Failed to create user %s: %v", userID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to initialize user account",
 			})
 		}
+		log.Printf("✅ GetEnhancedAnalytics: Created minimal user record for %s", userID)
 	}
 
 	// Get days parameter (default to 30)
@@ -210,15 +222,53 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		days = 30
 	}
 
-	analytics, err := h.service.GetEnhancedAnalytics(c.Context(), userID, days)
-	if err != nil {
+	log.Printf("📊 GetEnhancedAnalytics: Fetching analytics for user %s (days: %d)", userID, days)
+
+	// Get analytics with error handling and retries
+	var analytics *EnhancedAnalytics
+	var analyticsErr error
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		analytics, analyticsErr = h.service.GetEnhancedAnalytics(ctx, userID, days)
+		if analyticsErr == nil {
+			break
+		}
+
+		log.Printf("⚠️ GetEnhancedAnalytics: Attempt %d failed for user %s: %v", attempt, userID, analyticsErr)
+
+		// If it's a database connection issue, wait and retry
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+
+	if analyticsErr != nil {
+		log.Printf("❌ GetEnhancedAnalytics: All attempts failed for user %s: %v", userID, analyticsErr)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":   "Failed to get enhanced analytics",
-			"details": err.Error(),
+			"details": analyticsErr.Error(),
 		})
 	}
 
-	return c.JSON(analytics)
+	log.Printf("✅ GetEnhancedAnalytics: Successfully retrieved analytics for user %s", userID)
+
+	// Add comprehensive logging before response
+	log.Printf("📊 GetEnhancedAnalytics: Response data - Overview: %+v", analytics.Overview)
+	log.Printf("📊 GetEnhancedAnalytics: Response data - Top videos: %d, Recent videos: %d",
+		len(analytics.TopVideos), len(analytics.RecentVideos))
+
+	// Try to send the JSON response with error handling
+	log.Printf("📤 GetEnhancedAnalytics: Sending JSON response for user %s", userID)
+
+	if err := c.JSON(analytics); err != nil {
+		log.Printf("❌ GetEnhancedAnalytics: Failed to send JSON response for user %s: %v", userID, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to serialize response",
+		})
+	}
+
+	log.Printf("✅ GetEnhancedAnalytics: Successfully sent response for user %s", userID)
+	return nil
 }
 
 // GetGrowthAnalysis provides growth trend analysis

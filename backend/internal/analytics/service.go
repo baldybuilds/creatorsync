@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"time"
@@ -27,6 +28,8 @@ type Service interface {
 	CheckUserAnalyticsData(ctx context.Context, userID string) (bool, *time.Time, error)
 	CheckTwitchConnection(ctx context.Context, userID string) (bool, error)
 	IsHealthy() bool
+
+	CheckAnalyticsAccountMatch(ctx context.Context, userID string) (bool, error)
 }
 
 type service struct {
@@ -614,4 +617,33 @@ type ContentPerformance struct {
 	TopVideos []VideoAnalytics `json:"top_videos"`
 	TopGames  []GameAnalytics  `json:"top_games"`
 	Insights  []string         `json:"insights"`
+}
+
+// CheckAnalyticsAccountMatch verifies if stored analytics data matches the currently connected Twitch account
+func (s *service) CheckAnalyticsAccountMatch(ctx context.Context, userID string) (bool, error) {
+	// Get the currently connected Twitch account ID
+	var currentTwitchUserID string
+	err := s.standardDB.GetDB().QueryRowContext(ctx,
+		"SELECT twitch_user_id FROM user_twitch_tokens WHERE clerk_user_id = $1 AND encrypted_access_token IS NOT NULL AND encrypted_access_token != ''",
+		userID).Scan(&currentTwitchUserID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil // No connected account
+		}
+		return false, err
+	}
+
+	// Check if any analytics data exists for this clerk user but different twitch account
+	var analyticsCount int64
+	err = s.standardDB.GetDB().QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM twitch_videos WHERE clerk_user_id = $1 AND twitch_user_id != $2",
+		userID, currentTwitchUserID).Scan(&analyticsCount)
+
+	if err != nil {
+		return true, nil // Assume match if we can't check (don't break existing functionality)
+	}
+
+	// If there's analytics data for a different Twitch account, it's a mismatch
+	return analyticsCount == 0, nil
 }

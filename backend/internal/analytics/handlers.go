@@ -374,6 +374,48 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		return c.JSON(emptyResponse)
 	}
 
+	// Check if analytics data matches the currently connected Twitch account
+	accountMatch, err := h.service.CheckAnalyticsAccountMatch(ctx, userID)
+	if err != nil {
+		log.Printf("❌ Account match check failed for user %s: %v", userID, err)
+		accountMatch = true // Assume match on error to prevent breaking existing functionality
+	}
+
+	// If account mismatch detected, clear cache and show empty state until new data is collected
+	if !accountMatch {
+		log.Printf("🔄 Account switch detected for user %s - clearing stale analytics data", userID)
+		cache := GetAnalyticsCache()
+		cache.InvalidateUser(userID)
+
+		emptyResponse := map[string]interface{}{
+			"analytics": &EnhancedAnalytics{
+				Overview: VideoBasedOverview{
+					TotalViews:           0,
+					VideoCount:           0,
+					AverageViewsPerVideo: 0,
+					TotalWatchTimeHours:  0,
+					CurrentFollowers:     0,
+					CurrentSubscribers:   0,
+					FollowerChange:       0,
+					SubscriberChange:     0,
+				},
+				Performance: PerformanceData{
+					ViewsOverTime:       []ChartDataPoint{},
+					ContentDistribution: []ContentTypeData{},
+				},
+				TopVideos:    []VideoAnalytics{},
+				RecentVideos: []VideoAnalytics{},
+			},
+			"connection_status": map[string]interface{}{
+				"twitch_connected": true,
+				"account_switched": true,
+				"settings_url":     "/settings",
+			},
+		}
+		c.Set("X-Cache-Status", "ACCOUNT_SWITCHED")
+		return c.JSON(emptyResponse)
+	}
+
 	// Clear any cached analytics data before fetching fresh data
 	// This ensures we get the latest data after data collection
 	cache.InvalidateUserDataType(userID, "enhanced")

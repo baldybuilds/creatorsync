@@ -31,6 +31,7 @@ interface VideoBasedOverview {
 interface ConnectionStatus {
     twitch_connected: boolean;
     settings_url: string;
+    account_switched?: boolean;
 }
 
 interface ChartDataPoint {
@@ -458,6 +459,132 @@ const ContentPerformanceChart = ({
     );
 };
 
+// Zero Data State Component for Analytics Page
+const AnalyticsZeroDataState = ({ hasConnection }: { hasConnection: boolean }) => (
+    <motion.div
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6"
+    >
+        <div className="max-w-4xl mx-auto">
+            <div className="flex items-center mb-2">
+                <BarChart3 className="w-6 h-6 text-emerald-500 mr-2" />
+                <span className="text-sm text-emerald-400 font-medium">Channel Analytics</span>
+            </div>
+            <h1 className="text-3xl font-bold text-white mb-6">
+                {hasConnection ? "Welcome to Your Analytics Journey!" : "Connect Your Twitch Account"}
+            </h1>
+
+            <div className="bg-gradient-to-br from-emerald-500/10 to-blue-500/10 rounded-3xl p-12 border border-emerald-500/20 text-center">
+                <div className="w-24 h-24 bg-gradient-to-br from-emerald-500 to-blue-500 rounded-full mx-auto mb-8 flex items-center justify-center">
+                    {hasConnection ? (
+                        <TrendingUp className="w-12 h-12 text-white" />
+                    ) : (
+                        <BarChart3 className="w-12 h-12 text-white" />
+                    )}
+                </div>
+                
+                <h2 className="text-4xl font-bold text-white mb-6">
+                    {hasConnection ? "Your Creator Story Begins Here" : "Analytics Awaiting Connection"}
+                </h2>
+                
+                <p className="text-xl text-gray-300 mb-8 max-w-3xl mx-auto leading-relaxed">
+                    {hasConnection ? (
+                        <>
+                            Every great creator starts with their first piece of content. Your Twitch account is connected and ready – 
+                            now it's time to <span className="text-emerald-400 font-semibold">create, stream, and grow</span> your community. 
+                            As soon as you publish content, you'll see detailed analytics right here.
+                        </>
+                    ) : (
+                        <>
+                            Connect your Twitch account to unlock powerful analytics, track your channel's performance, 
+                            and get insights to grow your audience.
+                        </>
+                    )}
+                </p>
+
+                {hasConnection ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+                        <div className="bg-gradient-to-br from-purple-500/20 to-pink-500/10 border border-purple-500/30 rounded-2xl p-6">
+                            <Video className="w-10 h-10 text-purple-400 mx-auto mb-4" />
+                            <h3 className="text-white font-bold mb-2">Stream Content</h3>
+                            <p className="text-gray-400 text-sm">Go live and engage with your audience in real-time</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/30 rounded-2xl p-6">
+                            <TrendingUp className="w-10 h-10 text-emerald-400 mx-auto mb-4" />
+                            <h3 className="text-white font-bold mb-2">Track Growth</h3>
+                            <p className="text-gray-400 text-sm">Monitor followers, views, and engagement metrics</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-blue-500/20 to-cyan-500/10 border border-blue-500/30 rounded-2xl p-6">
+                            <Eye className="w-10 h-10 text-blue-400 mx-auto mb-4" />
+                            <h3 className="text-white font-bold mb-2">Analyze Performance</h3>
+                            <p className="text-gray-400 text-sm">Understand what content resonates with viewers</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-rose-500/20 to-orange-500/10 border border-rose-500/30 rounded-2xl p-6">
+                            <Heart className="w-10 h-10 text-rose-400 mx-auto mb-4" />
+                            <h3 className="text-white font-bold mb-2">Build Community</h3>
+                            <p className="text-gray-400 text-sm">Grow a loyal following around your content</p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-8">
+                            <TrendingUp className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+                            <h3 className="text-white font-semibold mb-3">Performance Tracking</h3>
+                            <p className="text-gray-400">Monitor views, followers, and subscriber growth over time.</p>
+                        </div>
+                        <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-8">
+                            <Video className="w-12 h-12 text-purple-500 mx-auto mb-4" />
+                            <h3 className="text-white font-semibold mb-3">Content Analysis</h3>
+                            <p className="text-gray-400">Understand which content performs best with your audience.</p>
+                        </div>
+                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-8">
+                            <Eye className="w-12 h-12 text-blue-500 mx-auto mb-4" />
+                            <h3 className="text-white font-semibold mb-3">Audience Insights</h3>
+                            <p className="text-gray-400">Discover engagement patterns and optimize your streaming strategy.</p>
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                    {hasConnection ? (
+                        <>
+                            <button
+                                onClick={() => window.open('https://www.twitch.tv/broadcast/dashboard/go-live', '_blank')}
+                                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-8 py-4 rounded-xl font-semibold transition-all duration-200 shadow-lg hover:shadow-purple-500/25"
+                            >
+                                Start Streaming Now
+                            </button>
+                            <button
+                                onClick={() => window.open('https://creator.twitch.tv/', '_blank')}
+                                className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-8 py-4 rounded-xl font-semibold transition-all duration-200 shadow-lg hover:shadow-emerald-500/25"
+                            >
+                                Creator Resources
+                            </button>
+                        </>
+                    ) : (
+                        <button
+                            onClick={() => window.open('/settings', '_self')}
+                            className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white px-10 py-4 rounded-xl font-semibold transition-all duration-200 shadow-lg hover:shadow-emerald-500/25"
+                        >
+                            Connect Twitch Account
+                        </button>
+                    )}
+                </div>
+
+                {hasConnection && (
+                    <div className="mt-8 p-6 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                        <p className="text-gray-400 text-sm">
+                            <strong className="text-emerald-400">Pro Tip:</strong> Your analytics will appear here automatically after you create content. 
+                            We'll track your streams, highlights, and clips to give you comprehensive insights into your channel's performance.
+                        </p>
+                    </div>
+                )}
+            </div>
+        </div>
+    </motion.div>
+);
+
 export default function AnalyticsPage() {
     const { isLoaded, isSignedIn, getToken } = useAuth();
     const [analytics, setAnalytics] = useState<EnhancedAnalytics | null>(null);
@@ -794,61 +921,33 @@ export default function AnalyticsPage() {
     // Also show if we have no analytics data and connectionStatus indicates disconnected
     if ((connectionStatus && !connectionStatus.twitch_connected) ||
         (connectionStatus === null && !analytics && !loading)) {
+        return <AnalyticsZeroDataState hasConnection={false} />;
+    }
+
+    // Check if we should show zero data state for connected users
+    const isConnected = connectionStatus?.twitch_connected === true;
+    const accountSwitched = connectionStatus?.account_switched === true;
+    const hasZeroData = isConnected && analytics && (
+        (analytics.overview?.totalViews === 0 && 
+         analytics.overview?.videoCount === 0 && 
+         analytics.overview?.currentFollowers === 0) ||
+        (!analytics.topVideos || analytics.topVideos.length === 0) &&
+        (!analytics.recentVideos || analytics.recentVideos.length === 0)
+    );
+
+    // Show encouraging zero data state for connected users with no content or account switches
+    if (hasZeroData || accountSwitched) {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
-                <div className="max-w-4xl mx-auto">
-                    <div className="flex items-center mb-2">
-                        <BarChart3 className="w-6 h-6 text-emerald-500 mr-2" />
-                        <span className="text-sm text-emerald-400 font-medium">Channel Analytics</span>
-                    </div>
-                    <h1 className="text-3xl font-bold text-white mb-6">Connect Your Twitch Account</h1>
-
-                    <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-8">
-                        <div className="text-center">
-                            <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                                <BarChart3 className="w-8 h-8 text-emerald-500" />
-                            </div>
-                            <h2 className="text-2xl font-bold text-white mb-4">Analytics Awaiting Connection</h2>
-                            <p className="text-gray-400 mb-8 max-w-2xl mx-auto">
-                                Connect your Twitch account to unlock powerful analytics, track your channel's performance, and get insights to grow your audience.
-                            </p>
-
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-6">
-                                    <TrendingUp className="w-8 h-8 text-emerald-500 mx-auto mb-3" />
-                                    <h3 className="text-white font-semibold mb-2">Performance Tracking</h3>
-                                    <p className="text-gray-400 text-sm">Monitor views, followers, and subscriber growth over time.</p>
-                                </div>
-                                <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-6">
-                                    <Video className="w-8 h-8 text-purple-500 mx-auto mb-3" />
-                                    <h3 className="text-white font-semibold mb-2">Content Analysis</h3>
-                                    <p className="text-gray-400 text-sm">Understand which content performs best with your audience.</p>
-                                </div>
-                                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-6">
-                                    <Eye className="w-8 h-8 text-blue-500 mx-auto mb-3" />
-                                    <h3 className="text-white font-semibold mb-2">Audience Insights</h3>
-                                    <p className="text-gray-400 text-sm">Discover engagement patterns and optimize your streaming strategy.</p>
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={() => setShowConnectionModal(true)}
-                                className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white px-8 py-3 rounded-lg font-semibold transition-all duration-200"
-                            >
-                                Connect Twitch Account
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Connection Modal */}
+            <>
+                <AnalyticsZeroDataState hasConnection={true} />
+                {/* Still include the connection modal for settings */}
                 <ConnectionModal
                     isOpen={showConnectionModal}
                     onClose={() => setShowConnectionModal(false)}
                     platform="twitch"
                     getToken={getToken}
                 />
-            </div>
+            </>
         );
     }
 

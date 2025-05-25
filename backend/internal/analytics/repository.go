@@ -136,10 +136,10 @@ func (r *repository) GetEnhancedAnalytics(ctx context.Context, userID string, da
 			COALESCE(SUM(duration_seconds), 0) as total_duration
 		FROM video_analytics 
 		WHERE user_id = $1
-		AND published_at >= CURRENT_DATE - INTERVAL '%d days'
+		AND published_at >= CURRENT_DATE - INTERVAL $2 * INTERVAL '1 day'
 	`
 
-	err := db.QueryRowContext(ctx, fmt.Sprintf(query, days), userID).Scan(
+	err := db.QueryRowContext(ctx, query, userID, days).Scan(
 		&videoCount, &totalViews, &totalDuration,
 	)
 
@@ -273,12 +273,12 @@ func (r *repository) GetVideosInDateRange(ctx context.Context, conn *database.Re
 		       thumbnail_url, published_at, created_at, updated_at
 		FROM video_analytics 
 		WHERE user_id = $1 
-		AND published_at >= CURRENT_DATE - INTERVAL '%d days'
+		AND published_at >= CURRENT_DATE - INTERVAL $2 * INTERVAL '1 day'
 		ORDER BY published_at DESC 
-		LIMIT $2
+		LIMIT $3
 	`
 
-	rows, err := conn.Query(ctx, fmt.Sprintf(query, days), userID, limit)
+	rows, err := conn.Query(ctx, query, userID, days, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/baldybuilds/creatorsync/internal/clerk"
 	"github.com/baldybuilds/creatorsync/internal/email"
 	"github.com/baldybuilds/creatorsync/internal/server/handlers"
+	"github.com/baldybuilds/creatorsync/internal/twitch"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -229,9 +230,110 @@ func (s *FiberServer) getUserProfileHandler(c *fiber.Ctx) error {
 func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID string) error {
 	log.Printf("🔍 ensureUserExistsInDatabase: Starting for user %s", userID)
 
-	// For now, we'll just log that we're ensuring the user exists
-	// The actual user management will be handled by the analytics service when needed
-	log.Printf("✅ ensureUserExistsInDatabase: User %s processing completed", userID)
+	// Check if user already exists
+	var exists bool
+	err := s.db.GetDB().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE clerk_user_id = $1)", userID).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check user existence: %w", err)
+	}
+
+	if exists {
+		log.Printf("✅ ensureUserExistsInDatabase: User %s already exists", userID)
+		return nil
+	}
+
+	// Get user details from Clerk
+	clerkUser, err := clerk.GetUserByID(ctx, userID)
+	if err != nil {
+		log.Printf("⚠️ ensureUserExistsInDatabase: Failed to get Clerk user %s: %v", userID, err)
+		// Create minimal user record if Clerk fails
+		return s.createMinimalUser(ctx, userID)
+	}
+
+	// Extract user information
+	username := ""
+	displayName := ""
+	email := ""
+	profileImageURL := ""
+
+	if clerkUser.Username != nil {
+		username = *clerkUser.Username
+	}
+	if clerkUser.FirstName != nil && clerkUser.LastName != nil {
+		displayName = *clerkUser.FirstName + " " + *clerkUser.LastName
+	} else if clerkUser.FirstName != nil {
+		displayName = *clerkUser.FirstName
+	}
+	if len(clerkUser.EmailAddresses) > 0 {
+		email = clerkUser.EmailAddresses[0].EmailAddress
+	}
+	if clerkUser.ImageURL != nil && *clerkUser.ImageURL != "" {
+		profileImageURL = *clerkUser.ImageURL
+	}
+
+	// Get Twitch user ID if connected
+	var twitchUserID *string
+	if oauthConfig, err := twitch.NewOAuthConfig(); err == nil {
+		if twitchID, err := oauthConfig.GetTwitchUserID(ctx, s.db, userID); err == nil {
+			twitchUserID = &twitchID
+		}
+	}
+
+	// Insert user into database
+	query := `
+		INSERT INTO users (
+			id, clerk_user_id, twitch_user_id, username, 
+			display_name, email, profile_image_url
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (clerk_user_id) DO UPDATE SET
+			twitch_user_id = EXCLUDED.twitch_user_id,
+			username = EXCLUDED.username,
+			display_name = EXCLUDED.display_name,
+			email = EXCLUDED.email,
+			profile_image_url = EXCLUDED.profile_image_url,
+			updated_at = NOW()
+	`
+
+	_, err = s.db.GetDB().ExecContext(ctx, query,
+		userID, userID, twitchUserID, username, displayName, email, profileImageURL)
+	if err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+
+	log.Printf("✅ ensureUserExistsInDatabase: Created user %s (username: %s, email: %s)",
+		userID, username, email)
+	return nil
+}
+
+// createMinimalUser creates a basic user record when Clerk data is unavailable
+func (s *FiberServer) createMinimalUser(ctx context.Context, userID string) error {
+	log.Printf("🔧 Creating minimal user record for %s", userID)
+
+	// Get Twitch user ID if connected
+	var twitchUserID *string
+	if oauthConfig, err := twitch.NewOAuthConfig(); err == nil {
+		if twitchID, err := oauthConfig.GetTwitchUserID(ctx, s.db, userID); err == nil {
+			twitchUserID = &twitchID
+		}
+	}
+
+	query := `
+		INSERT INTO users (
+			id, clerk_user_id, twitch_user_id, username, 
+			display_name, email
+		) VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (clerk_user_id) DO UPDATE SET
+			twitch_user_id = EXCLUDED.twitch_user_id,
+			updated_at = NOW()
+	`
+
+	_, err := s.db.GetDB().ExecContext(ctx, query,
+		userID, userID, twitchUserID, "User", "User", "user@example.com")
+	if err != nil {
+		return fmt.Errorf("failed to create minimal user: %w", err)
+	}
+
+	log.Printf("✅ Created minimal user record for %s", userID)
 	return nil
 }
 

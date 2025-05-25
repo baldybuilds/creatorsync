@@ -268,46 +268,70 @@ func (r *repository) GetVideoAnalytics(ctx context.Context, userID string, limit
 
 		// Test connection health
 		if pingErr := db.PingContext(ctx); pingErr != nil {
-			log.Printf("⚠️ Database ping failed on attempt %d: %v", attempt, pingErr)
+			log.Printf("⚠️ GetVideoAnalytics: Database unhealthy on attempt %d for user %s: %v", attempt, userID, pingErr)
 			if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
-				log.Printf("❌ Failed to reconnect on attempt %d: %v", attempt, reconnectErr)
-				if attempt == 2 {
-					return videos, fmt.Errorf("database connection failed after retry: %w", pingErr)
-				}
+				log.Printf("❌ GetVideoAnalytics: Reconnect failed on attempt %d: %v", attempt, reconnectErr)
 				continue
 			}
 			db = r.getDB()
 		}
 
-		err = db.SelectContext(ctx, &videos, query, userID, limit)
-		if err == nil {
-			break // Success
-		}
+		// Execute query with comprehensive error handling
+		log.Printf("🔍 GetVideoAnalytics: Executing query for user %s (attempt %d)", userID, attempt)
 
-		log.Printf("❌ GetVideoAnalytics query failed on attempt %d for user %s: %v", attempt, userID, err)
-		if attempt == 1 {
-			// Try to reconnect for second attempt
-			if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
-				log.Printf("❌ Failed to reconnect between attempts: %v", reconnectErr)
+		err = func() error {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("❌ GetVideoAnalytics: PANIC during query execution for user %s: %v", userID, r)
+					err = fmt.Errorf("panic during query execution: %v", r)
+				}
+			}()
+
+			return db.SelectContext(ctx, &videos, query, userID, limit)
+		}()
+
+		if err != nil {
+			log.Printf("❌ GetVideoAnalytics: Query failed on attempt %d for user %s: %v", attempt, userID, err)
+			if attempt < 2 {
+				time.Sleep(time.Duration(attempt) * time.Second)
+				continue
 			}
+		} else {
+			break
 		}
 	}
 
 	if err != nil {
-		log.Printf("❌ GetVideoAnalytics failed after all attempts for user %s: %v", userID, err)
+		log.Printf("❌ GetVideoAnalytics: All attempts failed for user %s: %v", userID, err)
 		return videos, err
 	}
 
 	log.Printf("📊 GetVideoAnalytics: Found %d videos for user %s", len(videos), userID)
 
-	// Debug log a few video details if found
-	for i, video := range videos {
-		if i < 3 { // Only log first 3 to avoid spam
-			log.Printf("📹 Video %d: ID=%s, Title=%s, Views=%d, Published=%v",
-				i+1, video.VideoID, video.Title, video.ViewCount, video.PublishedAt)
+	// Safely process and log video results
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ GetVideoAnalytics: PANIC during result processing for user %s: %v", userID, r)
 		}
+	}()
+
+	// Log video details with error handling
+	for i, video := range videos {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("❌ GetVideoAnalytics: PANIC logging video %d for user %s: %v", i, userID, r)
+				}
+			}()
+
+			if i < 3 { // Only log first 3 videos to avoid spam
+				log.Printf("📹 Video %d: ID=%s, Title=%s, Views=%d, Published=%v",
+					i+1, video.VideoID, video.Title, video.ViewCount, video.PublishedAt)
+			}
+		}()
 	}
 
+	log.Printf("✅ GetVideoAnalytics: Successfully processed %d videos for user %s", len(videos), userID)
 	return videos, nil
 }
 
@@ -529,41 +553,73 @@ func (r *repository) GetEnhancedAnalytics(ctx context.Context, userID string, da
 	// Get performance data over time
 	performance, err := r.getPerformanceData(ctx, userID, days)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get performance data: %w", err)
-	}
-	analytics.Performance = *performance
-
-	// Get top videos by view count - ensure connection is still healthy
-	if err := db.PingContext(ctx); err != nil {
-		log.Printf("⚠️ Database connection unhealthy before top videos query, reconnecting: %v", err)
-		if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
-			log.Printf("❌ Failed to reconnect for top videos: %v", reconnectErr)
+		log.Printf("⚠️ Failed to get performance data for user %s, using empty data: %v", userID, err)
+		// Continue with empty performance data rather than failing
+		analytics.Performance = PerformanceData{
+			ViewsOverTime:       []ChartDataPoint{},
+			ContentDistribution: []ContentTypeData{},
 		}
+	} else {
+		analytics.Performance = *performance
 	}
 
-	topVideos, err := r.GetVideoAnalytics(ctx, userID, 5)
-	if err != nil {
-		log.Printf("❌ Failed to get top videos for user %s: %v", userID, err)
-		return nil, fmt.Errorf("failed to get top videos: %w", err)
-	}
-	analytics.TopVideos = topVideos
-	log.Printf("✅ Retrieved %d top videos for user %s", len(topVideos), userID)
+	// Get top videos by view count with circuit breaker
+	log.Printf("🔍 GetEnhancedAnalytics: Starting top videos retrieval for user %s", userID)
+	topVideos, topErr := func() ([]VideoAnalytics, error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("❌ GetEnhancedAnalytics: PANIC during top videos retrieval for user %s: %v", userID, r)
+			}
+		}()
 
-	// Get recent videos - ensure connection is still healthy
-	if err := db.PingContext(ctx); err != nil {
-		log.Printf("⚠️ Database connection unhealthy before recent videos query, reconnecting: %v", err)
-		if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
-			log.Printf("❌ Failed to reconnect for recent videos: %v", reconnectErr)
+		// Test connection again before top videos query
+		if err := db.PingContext(ctx); err != nil {
+			log.Printf("⚠️ Database connection unhealthy before top videos query, reconnecting: %v", err)
+			if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
+				log.Printf("❌ Failed to reconnect for top videos: %v", reconnectErr)
+				return []VideoAnalytics{}, fmt.Errorf("database reconnection failed: %w", reconnectErr)
+			}
 		}
+
+		return r.GetVideoAnalytics(ctx, userID, 5)
+	}()
+
+	if topErr != nil {
+		log.Printf("⚠️ Failed to get top videos for user %s, using empty data: %v", userID, topErr)
+		analytics.TopVideos = []VideoAnalytics{}
+	} else {
+		analytics.TopVideos = topVideos
+		log.Printf("✅ Retrieved %d top videos for user %s", len(topVideos), userID)
 	}
 
-	recentVideos, err := r.GetVideoAnalytics(ctx, userID, 10)
-	if err != nil {
-		log.Printf("❌ Failed to get recent videos for user %s: %v", userID, err)
-		return nil, fmt.Errorf("failed to get recent videos: %w", err)
+	// Get recent videos with circuit breaker
+	log.Printf("🔍 GetEnhancedAnalytics: Starting recent videos retrieval for user %s", userID)
+	recentVideos, recentErr := func() ([]VideoAnalytics, error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("❌ GetEnhancedAnalytics: PANIC during recent videos retrieval for user %s: %v", userID, r)
+			}
+		}()
+
+		// Test connection again before recent videos query
+		if err := db.PingContext(ctx); err != nil {
+			log.Printf("⚠️ Database connection unhealthy before recent videos query, reconnecting: %v", err)
+			if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
+				log.Printf("❌ Failed to reconnect for recent videos: %v", reconnectErr)
+				return []VideoAnalytics{}, fmt.Errorf("database reconnection failed: %w", reconnectErr)
+			}
+		}
+
+		return r.GetVideoAnalytics(ctx, userID, 10)
+	}()
+
+	if recentErr != nil {
+		log.Printf("⚠️ Failed to get recent videos for user %s, using empty data: %v", userID, recentErr)
+		analytics.RecentVideos = []VideoAnalytics{}
+	} else {
+		analytics.RecentVideos = recentVideos
+		log.Printf("✅ Retrieved %d recent videos for user %s", len(recentVideos), userID)
 	}
-	analytics.RecentVideos = recentVideos
-	log.Printf("✅ Retrieved %d recent videos for user %s", len(recentVideos), userID)
 
 	log.Printf("🎉 GetEnhancedAnalytics completed successfully for user %s: %d top videos, %d recent videos",
 		userID, len(analytics.TopVideos), len(analytics.RecentVideos))

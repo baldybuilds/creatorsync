@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/baldybuilds/creatorsync/internal/analytics"
 	"github.com/baldybuilds/creatorsync/internal/clerk"
@@ -15,6 +17,33 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 )
+
+// Add a mutex map to prevent concurrent sync operations for the same user
+var (
+	userSyncMutexes  = make(map[string]*sync.Mutex)
+	userSyncMapMutex sync.RWMutex
+)
+
+// getUserSyncMutex gets or creates a mutex for a specific user
+func getUserSyncMutex(userID string) *sync.Mutex {
+	userSyncMapMutex.RLock()
+	if mutex, exists := userSyncMutexes[userID]; exists {
+		userSyncMapMutex.RUnlock()
+		return mutex
+	}
+	userSyncMapMutex.RUnlock()
+
+	userSyncMapMutex.Lock()
+	defer userSyncMapMutex.Unlock()
+
+	// Double-check pattern
+	if mutex, exists := userSyncMutexes[userID]; exists {
+		return mutex
+	}
+
+	userSyncMutexes[userID] = &sync.Mutex{}
+	return userSyncMutexes[userID]
+}
 
 func (s *FiberServer) RegisterFiberRoutes() {
 	env := os.Getenv("APP_ENV")
@@ -285,18 +314,47 @@ func (s *FiberServer) syncUserHandler(c *fiber.Ctx) error {
 
 	log.Printf("🔍 syncUserHandler: Processing sync for user %s", user.ID)
 
+	// Use mutex to prevent concurrent sync operations for the same user
+	userMutex := getUserSyncMutex(user.ID)
+	userMutex.Lock()
+	defer userMutex.Unlock()
+
+	// Create a context with timeout to prevent hanging requests
+	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+	defer cancel()
+
 	// Check if this is a new user by seeing if they exist in our database
 	analyticsRepo := analytics.NewRepository(s.db)
-	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), user.ID)
+	existingUser, err := analyticsRepo.GetUserByClerkID(ctx, user.ID)
 	isNewUser := (err != nil || existingUser == nil)
 
 	log.Printf("📊 syncUserHandler: User %s exists in DB: %t", user.ID, !isNewUser)
 
-	// Ensure user exists in our database
-	if err := s.ensureUserExistsInDatabase(c.Context(), user.ID); err != nil {
-		log.Printf("❌ syncUserHandler: Failed to ensure user exists in database for %s: %v", user.ID, err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fmt.Sprintf("Failed to sync user data: %v", err),
+	// Ensure user exists in our database with retry logic for database connection issues
+	var syncErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		syncErr = s.ensureUserExistsInDatabase(ctx, user.ID)
+		if syncErr == nil {
+			break
+		}
+
+		log.Printf("⚠️ syncUserHandler: Attempt %d failed for user %s: %v", attempt, user.ID, syncErr)
+
+		// If it's a database connection issue, wait and retry
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+
+	if syncErr != nil {
+		log.Printf("❌ syncUserHandler: All attempts failed for user %s: %v", user.ID, syncErr)
+		// Don't return 500 for database issues - return success but log the issue
+		// The user can try the sync again later
+		return c.JSON(fiber.Map{
+			"message":      "User sync initiated (database connection issues encountered)",
+			"user_id":      user.ID,
+			"is_new_user":  isNewUser,
+			"retry_needed": true,
 		})
 	}
 
@@ -306,7 +364,7 @@ func (s *FiberServer) syncUserHandler(c *fiber.Ctx) error {
 	if isNewUser {
 		log.Printf("🔍 syncUserHandler: Checking if new user %s has Twitch connection", user.ID)
 		// Check if user has Twitch connected via Clerk
-		clerkUser, clerkErr := clerk.GetUserByID(c.Context(), user.ID)
+		clerkUser, clerkErr := clerk.GetUserByID(ctx, user.ID)
 		if clerkErr != nil {
 			log.Printf("⚠️ syncUserHandler: Failed to get Clerk user for %s (cross-env?): %v", user.ID, clerkErr)
 		} else {

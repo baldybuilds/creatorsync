@@ -380,17 +380,27 @@ export default function AnalyticsPage() {
             const token = await getToken();
             const apiBaseUrl = getApiBaseUrl();
 
-            // Sync user to ensure they exist in the database
+            // Sync user to ensure they exist in the database with improved error handling
             try {
-                await fetch(`${apiBaseUrl}/api/user/sync`, {
+                const syncResponse = await fetch(`${apiBaseUrl}/api/user/sync`, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json',
                     },
                 });
-            } catch {
-                // Continue silently if sync fails
+                
+                if (syncResponse.ok) {
+                    const syncData = await syncResponse.json();
+                    if (syncData.retry_needed) {
+                        console.log('User sync completed with database issues, data may be refreshing...');
+                    }
+                } else {
+                    console.warn('User sync had issues, continuing with analytics fetch...');
+                }
+            } catch (syncError) {
+                console.warn('User sync failed, continuing with analytics fetch...', syncError);
+                // Continue anyway - analytics might still work if user already exists
             }
 
             const response = await fetch(`${apiBaseUrl}/api/analytics/enhanced?days=${timeRange}`, {

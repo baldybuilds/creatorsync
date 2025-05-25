@@ -74,7 +74,7 @@ func (r *repository) GetAnalyticsChartData(ctx context.Context, userID string, d
 		SELECT date, followers_count 
 		FROM channel_analytics 
 		WHERE user_id = $1 
-		AND date >= CURRENT_DATE - ($2 || ' days')::INTERVAL
+		AND date >= CURRENT_DATE - ($2::TEXT || ' days')::INTERVAL
 		ORDER BY date ASC
 	`
 
@@ -136,7 +136,7 @@ func (r *repository) GetEnhancedAnalytics(ctx context.Context, userID string, da
 			COALESCE(SUM(duration_seconds), 0) as total_duration
 		FROM video_analytics 
 		WHERE user_id = $1
-		AND published_at >= CURRENT_DATE - ($2 || ' days')::INTERVAL
+		AND published_at >= CURRENT_DATE - ($2::TEXT || ' days')::INTERVAL
 	`
 
 	err := db.QueryRowContext(ctx, query, userID, days).Scan(
@@ -277,7 +277,7 @@ func (r *repository) GetVideosInDateRange(ctx context.Context, conn *database.Re
 		       thumbnail_url, published_at, created_at, updated_at
 		FROM video_analytics 
 		WHERE user_id = $1 
-		AND published_at >= CURRENT_DATE - ($2 || ' days')::INTERVAL
+		AND published_at >= CURRENT_DATE - ($2::TEXT || ' days')::INTERVAL
 		ORDER BY published_at DESC 
 		LIMIT $3
 	`

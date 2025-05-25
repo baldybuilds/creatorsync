@@ -151,23 +151,29 @@ func (s *FiberServer) getUserProfileHandler(c *fiber.Ctx) error {
 
 // ensureUserExistsInDatabase creates or updates a user record in our database
 func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID string) error {
+	log.Printf("🔍 ensureUserExistsInDatabase: Starting for user %s", userID)
+
 	// Check if user already exists in our database
 	analyticsRepo := analytics.NewRepository(s.db)
 	existingUser, err := analyticsRepo.GetUserByClerkID(ctx, userID)
 	if err != nil {
+		log.Printf("❌ ensureUserExistsInDatabase: Failed to check existing user %s: %v", userID, err)
 		return fmt.Errorf("failed to check existing user: %w", err)
 	}
 
 	if existingUser != nil {
+		log.Printf("✅ ensureUserExistsInDatabase: User %s already exists", userID)
 		return nil // User already exists
 	}
+
+	log.Printf("🔍 ensureUserExistsInDatabase: User %s doesn't exist, creating...", userID)
 
 	// User doesn't exist, let's create them
 	// Try to get user's Clerk profile, but handle cross-environment cases gracefully
 	clerkUser, err := clerk.GetUserByID(ctx, userID)
 	if err != nil {
 		// If Clerk user doesn't exist (e.g., cross-environment user ID), create basic record
-		log.Printf("⚠️ Clerk user %s not found in current environment, creating basic user record: %v", userID, err)
+		log.Printf("⚠️ ensureUserExistsInDatabase: Clerk user %s not found in current environment, creating basic user record: %v", userID, err)
 
 		// Create minimal user record with just the Clerk ID
 		user := &analytics.User{
@@ -180,12 +186,15 @@ func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID str
 
 		// Create user record in database
 		if err := analyticsRepo.CreateOrUpdateUser(ctx, user); err != nil {
+			log.Printf("❌ ensureUserExistsInDatabase: Failed to create basic user record for %s: %v", userID, err)
 			return fmt.Errorf("failed to create basic user record: %w", err)
 		}
 
-		log.Printf("✅ Created basic user record for cross-environment user %s", userID)
+		log.Printf("✅ ensureUserExistsInDatabase: Created basic user record for cross-environment user %s", userID)
 		return nil
 	}
+
+	log.Printf("✅ ensureUserExistsInDatabase: Got Clerk user for %s, building full record", userID)
 
 	// Initialize user with basic info from Clerk
 	user := &analytics.User{
@@ -196,6 +205,7 @@ func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID str
 	// Safely set email if available
 	if len(clerkUser.EmailAddresses) > 0 {
 		user.Email = clerkUser.EmailAddresses[0].EmailAddress
+		log.Printf("📧 ensureUserExistsInDatabase: Set email for user %s", userID)
 	}
 
 	// Set name fields safely
@@ -210,9 +220,12 @@ func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID str
 		}
 	}
 
+	log.Printf("👤 ensureUserExistsInDatabase: Set display name '%s' for user %s", user.DisplayName, userID)
+
 	// Try to get Twitch info if available
 	for _, account := range clerkUser.ExternalAccounts {
 		if account.Provider == "oauth_twitch" {
+			log.Printf("🎮 ensureUserExistsInDatabase: Found Twitch account for user %s", userID)
 			user.TwitchUserID = account.ProviderUserID
 			if account.Username != nil {
 				user.Username = *account.Username
@@ -220,6 +233,7 @@ func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID str
 
 			// Try to get additional Twitch info if we have OAuth token
 			if token, tokenErr := clerk.GetOAuthToken(ctx, userID, "oauth_twitch"); tokenErr == nil {
+				log.Printf("🔑 ensureUserExistsInDatabase: Got Twitch token for user %s, fetching profile", userID)
 				// Initialize Twitch client
 				twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
 				twitchClientSecret := os.Getenv("TWITCH_CLIENT_SECRET")
@@ -232,48 +246,70 @@ func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID str
 							if userInfo.Email != "" {
 								user.Email = userInfo.Email
 							}
+							log.Printf("✅ ensureUserExistsInDatabase: Enhanced user %s with Twitch profile data", userID)
+						} else {
+							log.Printf("⚠️ ensureUserExistsInDatabase: Failed to get Twitch user info for %s: %v", userID, infoErr)
 						}
+					} else {
+						log.Printf("⚠️ ensureUserExistsInDatabase: Failed to create Twitch client for %s: %v", userID, clientErr)
 					}
+				} else {
+					log.Printf("⚠️ ensureUserExistsInDatabase: Missing Twitch client credentials")
 				}
+			} else {
+				log.Printf("⚠️ ensureUserExistsInDatabase: Failed to get Twitch token for %s: %v", userID, tokenErr)
 			}
 			break
 		}
 	}
 
 	// Create user record in database
+	log.Printf("💾 ensureUserExistsInDatabase: Creating database record for user %s", userID)
 	if err := analyticsRepo.CreateOrUpdateUser(ctx, user); err != nil {
+		log.Printf("❌ ensureUserExistsInDatabase: Failed to create user record for %s: %v", userID, err)
 		return fmt.Errorf("failed to create user record: %w", err)
 	}
 
-	log.Printf("✅ Created user record for %s (%s)", user.DisplayName, userID)
+	log.Printf("✅ ensureUserExistsInDatabase: Created user record for %s (%s)", user.DisplayName, userID)
 	return nil
 }
 
 func (s *FiberServer) syncUserHandler(c *fiber.Ctx) error {
 	user, err := clerk.GetUserFromContext(c)
 	if err != nil {
+		log.Printf("❌ syncUserHandler: Failed to get user from context: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
 	}
+
+	log.Printf("🔍 syncUserHandler: Processing sync for user %s", user.ID)
 
 	// Check if this is a new user by seeing if they exist in our database
 	analyticsRepo := analytics.NewRepository(s.db)
 	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), user.ID)
 	isNewUser := (err != nil || existingUser == nil)
 
+	log.Printf("📊 syncUserHandler: User %s exists in DB: %t", user.ID, !isNewUser)
+
 	// Ensure user exists in our database
 	if err := s.ensureUserExistsInDatabase(c.Context(), user.ID); err != nil {
+		log.Printf("❌ syncUserHandler: Failed to ensure user exists in database for %s: %v", user.ID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fmt.Sprintf("Failed to sync user data: %v", err),
 		})
 	}
 
+	log.Printf("✅ syncUserHandler: User %s synced successfully", user.ID)
+
 	// If this is a new user with a Twitch connection, trigger their first data collection
 	if isNewUser {
+		log.Printf("🔍 syncUserHandler: Checking if new user %s has Twitch connection", user.ID)
 		// Check if user has Twitch connected via Clerk
 		clerkUser, clerkErr := clerk.GetUserByID(c.Context(), user.ID)
-		if clerkErr == nil {
+		if clerkErr != nil {
+			log.Printf("⚠️ syncUserHandler: Failed to get Clerk user for %s (cross-env?): %v", user.ID, clerkErr)
+		} else {
 			hasTwitch := false
 			for _, account := range clerkUser.ExternalAccounts {
 				if account.Provider == "oauth_twitch" {
@@ -282,12 +318,17 @@ func (s *FiberServer) syncUserHandler(c *fiber.Ctx) error {
 				}
 			}
 
+			log.Printf("📊 syncUserHandler: User %s has Twitch connection: %t", user.ID, hasTwitch)
+
 			if hasTwitch {
+				log.Printf("🚀 syncUserHandler: Triggering background collection for new user %s", user.ID)
 				// Trigger first-time data collection in background
 				go func() {
 					// Get the background collection manager from the server
 					if s.backgroundCollectionMgr != nil {
 						s.backgroundCollectionMgr.TriggerUserCollection(user.ID)
+					} else {
+						log.Printf("⚠️ Background collection manager not available for user %s", user.ID)
 					}
 				}()
 			}

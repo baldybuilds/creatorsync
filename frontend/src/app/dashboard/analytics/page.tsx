@@ -57,6 +57,7 @@ interface VideoAnalytics {
     video_type: string;
     view_count: number;
     published_at: string;
+    duration_seconds?: number;
     duration_formatted?: string;
 }
 
@@ -357,10 +358,19 @@ const ContentPerformanceChart = ({
                                                         {content.title}
                                                     </h4>
                                                     
-                                                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
-                                                        <span>📅 {content.displayDate}</span>
-                                                        <span>⏰ {content.daysSince} days ago</span>
-                                                    </div>
+                                                                                        <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                                        <span>📅 {content.displayDate}</span>
+                                        <span>⏰ {content.daysSince} days ago</span>
+                                        {analytics && (
+                                            (() => {
+                                                const video = analytics.recentVideos.find(v => v.id === content.id) || 
+                                                             analytics.topVideos.find(v => v.id === content.id);
+                                                return video?.duration_formatted && (
+                                                    <span>🕒 {video.duration_formatted}</span>
+                                                );
+                                            })()
+                                        )}
+                                    </div>
                                                 </div>
 
                                                 {/* Performance metrics */}
@@ -397,7 +407,12 @@ const ContentPerformanceChart = ({
                             { label: 'Total Content', value: contentData.length, icon: '📚', color: 'text-purple-400' },
                             { label: 'Avg Performance', value: formatNumber(averageViews), icon: '📊', color: 'text-blue-400' },
                             { label: 'Top Performer', value: formatNumber(maxViews), icon: '🏆', color: 'text-yellow-400' },
-                            { label: 'Clips vs Broadcasts', value: `${contentData.filter(d => d.type === 'clip').length}:${contentData.filter(d => d.type === 'broadcast').length}`, icon: '⚖️', color: 'text-emerald-400' }
+                            { 
+                                label: 'Content Mix', 
+                                value: `${contentData.filter(d => d.type === 'clip').length} clips, ${contentData.filter(d => d.type === 'broadcast').length} broadcasts`, 
+                                icon: '🎬', 
+                                color: 'text-emerald-400' 
+                            }
                         ].map((stat, index) => (
                                                          <motion.div
                                 key={`stat-${stat.label}-${index}`}
@@ -960,6 +975,12 @@ export default function AnalyticsPage() {
                                 <div className="flex justify-between items-center mb-2">
                                     <span className="text-gray-300">Total Watch Time</span>
                                     <span className="text-white font-semibold">{formatDuration(safeOverview.totalWatchTimeHours)}</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded-full h-2">
+                                    <div
+                                        className="bg-blue-500 h-2 rounded-full"
+                                        style={{ width: `${Math.min((safeOverview.totalWatchTimeHours / Math.max(safeOverview.totalWatchTimeHours * 1.2, 1)) * 100, 100)}%` }}
+                                    ></div>
                                 </div>
                             </div>
                             <div className="pt-2 border-t border-gray-700">

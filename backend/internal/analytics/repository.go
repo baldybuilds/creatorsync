@@ -202,9 +202,12 @@ func (r *repository) SaveVideos(ctx context.Context, conn *database.RequestConne
 	var lastError error
 
 	for _, video := range videos {
+		// Parse duration from Twitch format (e.g., "1h2m3s") to seconds
+		durationSeconds := twitch.ParseDurationToSeconds(video.Duration)
+
 		_, err := conn.Exec(ctx, query,
 			userID, video.ID, video.Title, video.Type,
-			0, video.ViewCount, video.ThumbnailURL, &video.PublishedAt,
+			durationSeconds, video.ViewCount, video.ThumbnailURL, &video.PublishedAt,
 		)
 
 		if err != nil {
@@ -261,6 +264,7 @@ func (r *repository) GetVideos(ctx context.Context, conn *database.RequestConnec
 		video.PublishedAt = &publishedAt
 		video.CreatedAt = createdAt
 		video.UpdatedAt = updatedAt
+		video.DurationFormatted = twitch.FormatSecondsToHMS(video.Duration)
 		videos = append(videos, video)
 	}
 
@@ -302,6 +306,7 @@ func (r *repository) GetVideosInDateRange(ctx context.Context, conn *database.Re
 		video.PublishedAt = &publishedAt
 		video.CreatedAt = createdAt
 		video.UpdatedAt = updatedAt
+		video.DurationFormatted = twitch.FormatSecondsToHMS(video.Duration)
 		videos = append(videos, video)
 	}
 
@@ -351,6 +356,7 @@ func (r *repository) getVideosForAnalytics(ctx context.Context, userID string, l
 		video.PublishedAt = &publishedAt
 		video.CreatedAt = createdAt
 		video.UpdatedAt = updatedAt
+		video.DurationFormatted = twitch.FormatSecondsToHMS(video.Duration)
 		videos = append(videos, video)
 	}
 

@@ -50,19 +50,20 @@ type StreamSession struct {
 
 // VideoAnalytics represents video performance metrics
 type VideoAnalytics struct {
-	ID           int        `json:"id" db:"id"`
-	UserID       string     `json:"user_id" db:"user_id"`
-	VideoID      string     `json:"video_id" db:"video_id"`
-	Title        string     `json:"title" db:"title"`
-	VideoType    string     `json:"video_type" db:"video_type"`
-	Duration     int        `json:"duration_seconds" db:"duration_seconds"`
-	ViewCount    int        `json:"view_count" db:"view_count"`
-	LikeCount    int        `json:"like_count" db:"like_count"`
-	CommentCount int        `json:"comment_count" db:"comment_count"`
-	ThumbnailURL string     `json:"thumbnail_url" db:"thumbnail_url"`
-	PublishedAt  *time.Time `json:"published_at" db:"published_at"`
-	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
+	ID                int        `json:"id" db:"id"`
+	UserID            string     `json:"user_id" db:"user_id"`
+	VideoID           string     `json:"video_id" db:"video_id"`
+	Title             string     `json:"title" db:"title"`
+	VideoType         string     `json:"video_type" db:"video_type"`
+	Duration          int        `json:"duration_seconds" db:"duration_seconds"`
+	DurationFormatted string     `json:"duration_formatted"`
+	ViewCount         int        `json:"view_count" db:"view_count"`
+	LikeCount         int        `json:"like_count" db:"like_count"`
+	CommentCount      int        `json:"comment_count" db:"comment_count"`
+	ThumbnailURL      string     `json:"thumbnail_url" db:"thumbnail_url"`
+	PublishedAt       *time.Time `json:"published_at" db:"published_at"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // VideoDailyStats represents daily video performance tracking

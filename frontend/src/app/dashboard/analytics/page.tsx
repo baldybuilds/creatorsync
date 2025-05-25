@@ -57,6 +57,7 @@ interface VideoAnalytics {
     video_type: string;
     view_count: number;
     published_at: string;
+    duration_formatted?: string;
 }
 
 interface EnhancedAnalytics {

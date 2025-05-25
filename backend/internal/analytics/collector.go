@@ -195,6 +195,7 @@ func (c *collector) fetchUserVideos(ctx context.Context, token, twitchUserID str
 	limit := 100
 	maxVideos := 500
 
+	// Fetch regular videos (VODs, highlights, uploads)
 	for len(allVideos) < maxVideos {
 		videos, _, err := c.twitchClient.GetUserVideos(ctx, token, twitchUserID, limit)
 		if err != nil {
@@ -209,6 +210,34 @@ func (c *collector) fetchUserVideos(ctx context.Context, token, twitchUserID str
 		allVideos = append(allVideos, videos...)
 	}
 
-	log.Printf("🎬 Fetched %d videos for Twitch user %s", len(allVideos), twitchUserID)
+	// Fetch clips and convert them to VideoInfo format
+	clips, err := c.twitchClient.GetClips(ctx, token, twitchUserID, 50)
+	if err != nil {
+		log.Printf("⚠️ Failed to fetch clips for user %s: %v (continuing without clips)", twitchUserID, err)
+	} else {
+		log.Printf("📎 Fetched %d clips for Twitch user %s", len(clips), twitchUserID)
+
+		// Convert clips to VideoInfo format
+		for _, clip := range clips {
+			clipAsVideo := twitch.VideoInfo{
+				ID:           clip.ID,
+				UserID:       clip.BroadcasterID,
+				UserName:     clip.BroadcasterName,
+				Title:        clip.Title,
+				Description:  "", // Clips don't have descriptions
+				CreatedAt:    clip.CreatedAt,
+				PublishedAt:  clip.CreatedAt, // Use created_at as published_at for clips
+				URL:          clip.URL,
+				ThumbnailURL: clip.ThumbnailURL,
+				ViewCount:    clip.ViewCount,
+				Language:     clip.Language,
+				Type:         "clip",
+				Duration:     fmt.Sprintf("%.0fs", clip.Duration), // Convert float seconds to string format
+			}
+			allVideos = append(allVideos, clipAsVideo)
+		}
+	}
+
+	log.Printf("🎬 Total content fetched: %d videos + clips for user %s", len(allVideos), twitchUserID)
 	return allVideos, nil
 }

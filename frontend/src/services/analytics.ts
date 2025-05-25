@@ -46,6 +46,7 @@ export interface VideoAnalytics {
     title: string;
     videoType: string;
     duration: number;
+    durationFormatted: string;
     viewCount: number;
     thumbnailUrl: string;
     publishedAt: string;

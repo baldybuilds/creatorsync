@@ -47,20 +47,37 @@ func getUserSyncMutex(userID string) *sync.Mutex {
 
 func (s *FiberServer) RegisterFiberRoutes() {
 	env := os.Getenv("APP_ENV")
+	environment := os.Getenv("ENVIRONMENT") // Alternative env var
+
+	// Log environment detection for debugging
+	log.Printf("🌍 CORS Environment Detection:")
+	log.Printf("   APP_ENV: %s", env)
+	log.Printf("   ENVIRONMENT: %s", environment)
+
 	allowedOrigins := "*"
 
-	if env == "production" {
+	// Check multiple environment indicators for staging
+	isStaging := env == "staging" || environment == "staging" ||
+		env == "dev" || environment == "dev" ||
+		os.Getenv("DATABASE_URL") != "" // Cloud databases often indicate staging/production
+
+	// Check for production
+	isProduction := env == "production" || environment == "production"
+
+	if isProduction {
 		allowedOrigins = "https://creatorsync.app,https://www.creatorsync.app"
-	} else if env == "staging" {
-		allowedOrigins = "https://dev.creatorsync.app"
+	} else if isStaging {
+		allowedOrigins = "https://dev.creatorsync.app,https://creatorsync.app"
 	} else {
-		allowedOrigins = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
+		allowedOrigins = "http://localhost:3000,http://localhost:5173,http://localhost:5174,https://dev.creatorsync.app"
 	}
+
+	log.Printf("🔗 CORS Allowed Origins: %s", allowedOrigins)
 
 	s.App.Use(cors.New(cors.Config{
 		AllowOrigins:     allowedOrigins,
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
-		AllowHeaders:     "Accept,Authorization,Content-Type",
+		AllowHeaders:     "Accept,Authorization,Content-Type,X-Requested-With",
 		AllowCredentials: true, // Enable credentials support for cross-origin requests
 		MaxAge:           300,
 	}))
@@ -74,6 +91,7 @@ func (s *FiberServer) RegisterFiberRoutes() {
 	// Public routes
 	s.App.Get("/", s.HelloWorldHandler)
 	s.App.Get("/health", s.healthHandler)
+	s.App.Get("/debug/cors", s.corsDebugHandler)
 	s.App.Post("/api/waitlist", s.joinWaitlistHandler)
 
 	// Register Analytics routes (includes both public and protected routes)
@@ -102,6 +120,23 @@ func (s *FiberServer) HelloWorldHandler(c *fiber.Ctx) error {
 
 func (s *FiberServer) healthHandler(c *fiber.Ctx) error {
 	return c.JSON(s.db.Health())
+}
+
+func (s *FiberServer) corsDebugHandler(c *fiber.Ctx) error {
+	env := os.Getenv("APP_ENV")
+	environment := os.Getenv("ENVIRONMENT")
+	databaseURL := os.Getenv("DATABASE_URL")
+
+	return c.JSON(fiber.Map{
+		"cors_debug": fiber.Map{
+			"APP_ENV":        env,
+			"ENVIRONMENT":    environment,
+			"DATABASE_URL":   databaseURL != "",
+			"request_origin": c.Get("Origin"),
+			"user_agent":     c.Get("User-Agent"),
+			"timestamp":      time.Now().UTC().Format(time.RFC3339),
+		},
+	})
 }
 
 func (s *FiberServer) joinWaitlistHandler(c *fiber.Ctx) error {

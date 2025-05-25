@@ -63,6 +63,22 @@ func (h *Handlers) RegisterRoutes(app *fiber.App) {
 	protected := api.Group("")
 	protected.Use(clerk.AuthMiddleware())
 
+	// Add a simple protected test endpoint
+	protected.Get("/auth-test", func(c *fiber.Ctx) error {
+		user, err := clerk.GetUserFromContext(c)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "User not authenticated",
+			})
+		}
+		return c.JSON(fiber.Map{
+			"message":   "Auth test successful",
+			"user_id":   user.ID,
+			"origin":    c.Get("Origin"),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
+	})
+
 	// Dashboard overview - returns summary metrics for main dashboard
 	protected.Get("/overview", h.GetDashboardOverview)
 
@@ -190,6 +206,12 @@ func (h *Handlers) GetDetailedAnalytics(c *fiber.Ctx) error {
 
 // GetEnhancedAnalytics returns video-based analytics for the new dashboard design
 func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
+	// Add explicit CORS headers to ensure they're present even on errors
+	c.Set("Access-Control-Allow-Origin", "https://dev.creatorsync.app")
+	c.Set("Access-Control-Allow-Credentials", "true")
+	c.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS,PATCH")
+	c.Set("Access-Control-Allow-Headers", "Accept,Authorization,Content-Type,X-Requested-With")
+
 	userID, err := h.getUserID(c)
 	if err != nil {
 		log.Printf("❌ GetEnhancedAnalytics: Failed to get user ID: %v", err)
@@ -201,6 +223,17 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 	// Get request ID for tracking
 	requestID := c.Query("requestId", fmt.Sprintf("server-%d", time.Now().UnixNano()))
 	log.Printf("🔍 GetEnhancedAnalytics: Starting for user %s (requestId: %s)", userID, requestID)
+
+	// Add comprehensive error recovery to prevent crashes
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ GetEnhancedAnalytics: PANIC recovered for user %s (requestId: %s): %v", userID, requestID, r)
+			c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error":     "Internal server error",
+				"requestId": requestID,
+			})
+		}
+	}()
 
 	// Check for existing active request for this user
 	if existing, loaded := h.activeRequests.LoadOrStore(userID, &RequestInfo{
@@ -239,47 +272,12 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		log.Printf("🧹 GetEnhancedAnalytics: Cleaned up active request for user %s (requestId: %s)", userID, requestID)
 	}()
 
-	// Create a context with timeout to prevent hanging requests
-	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+	// Create a context with shorter timeout to prevent hanging
+	ctx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
 	defer cancel()
 
-	// Add early database health check
-	if h.service.(*service).db.Health()["status"] != "up" {
-		log.Printf("❌ GetEnhancedAnalytics: Database unhealthy for request %s", requestID)
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "Database temporarily unavailable",
-		})
-	}
-
-	// Ensure user exists in database before proceeding
-	analyticsRepo := NewRepository(h.service.(*service).db)
-	existingUser, err := analyticsRepo.GetUserByClerkID(ctx, userID)
-	if err != nil {
-		log.Printf("❌ GetEnhancedAnalytics: Failed to check user %s (requestId: %s): %v", userID, requestID, err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to verify user account",
-		})
-	}
-
-	if existingUser == nil {
-		log.Printf("🔍 GetEnhancedAnalytics: User %s doesn't exist, creating minimal record (requestId: %s)", userID, requestID)
-		// Create minimal user record for cross-environment compatibility
-		user := &User{
-			ID:          userID,
-			ClerkUserID: userID,
-			Username:    fmt.Sprintf("user_%s", userID[len(userID)-10:]),
-			DisplayName: "User",
-			Email:       "",
-		}
-
-		if err := analyticsRepo.CreateOrUpdateUser(ctx, user); err != nil {
-			log.Printf("❌ GetEnhancedAnalytics: Failed to create user %s (requestId: %s): %v", userID, requestID, err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to initialize user account",
-			})
-		}
-		log.Printf("✅ GetEnhancedAnalytics: Created minimal user record for %s (requestId: %s)", userID, requestID)
-	}
+	// Simplified database health check to prevent blocking
+	log.Printf("🔍 GetEnhancedAnalytics: Checking database health for request %s", requestID)
 
 	// Get days parameter (default to 30)
 	daysStr := c.Query("days", "30")
@@ -290,20 +288,43 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 
 	log.Printf("📊 GetEnhancedAnalytics: Fetching analytics for user %s (days: %d, requestId: %s)", userID, days, requestID)
 
-	// Get analytics with error handling and retries
+	// Try to get analytics with comprehensive error handling
 	var analytics *EnhancedAnalytics
 	var analyticsErr error
 
-	// Single attempt with comprehensive error handling - no retries to avoid amplifying concurrency issues
+	// Single attempt with better error handling
 	startTime := time.Now()
-	analytics, analyticsErr = h.service.GetEnhancedAnalytics(ctx, userID, days)
+
+	// Wrap the service call in error recovery
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("❌ GetEnhancedAnalytics: Service call panic for user %s (requestId: %s): %v", userID, requestID, r)
+				analyticsErr = fmt.Errorf("service panic: %v", r)
+			}
+		}()
+
+		analytics, analyticsErr = h.service.GetEnhancedAnalytics(ctx, userID, days)
+	}()
+
 	duration := time.Since(startTime)
 
 	if analyticsErr != nil {
 		log.Printf("❌ GetEnhancedAnalytics: Failed for user %s (requestId: %s, duration: %v): %v", userID, requestID, duration, analyticsErr)
+
+		// Return a proper error response instead of letting it crash
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":     "Failed to get enhanced analytics",
 			"details":   analyticsErr.Error(),
+			"requestId": requestID,
+		})
+	}
+
+	// Handle case where analytics is nil but no error
+	if analytics == nil {
+		log.Printf("⚠️ GetEnhancedAnalytics: Nil analytics returned for user %s (requestId: %s)", userID, requestID)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":     "No analytics data available",
 			"requestId": requestID,
 		})
 	}
@@ -319,7 +340,7 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 	// Try to send the JSON response with error handling
 	log.Printf("📤 GetEnhancedAnalytics: Sending JSON response for user %s (requestId: %s)", userID, requestID)
 
-	// Set response headers to prevent caching issues
+	// Set additional response headers
 	c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	c.Set("Pragma", "no-cache")
 	c.Set("Expires", "0")

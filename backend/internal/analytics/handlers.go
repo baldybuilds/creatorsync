@@ -44,7 +44,17 @@ func (h *Handlers) getUserID(c *fiber.Ctx) (string, error) {
 
 // RegisterRoutes registers all analytics routes
 func (h *Handlers) RegisterRoutes(app *fiber.App) {
+	// Create analytics API group that inherits from main app (with CORS)
 	api := app.Group("/api/analytics")
+
+	// Add a test endpoint to verify CORS is working
+	api.Get("/cors-test", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"message":   "CORS test successful",
+			"origin":    c.Get("Origin"),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
+	})
 
 	// Public routes (no authentication required)
 	api.Get("/health", h.HealthCheck)

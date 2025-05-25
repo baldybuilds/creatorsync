@@ -94,7 +94,8 @@ func (s *FiberServer) RegisterFiberRoutes() {
 	s.App.Get("/debug/cors", s.corsDebugHandler)
 	s.App.Post("/api/waitlist", s.joinWaitlistHandler)
 
-	// Register Analytics routes (includes both public and protected routes)
+	// Register Analytics routes AFTER CORS middleware is set up
+	// This ensures analytics routes inherit the CORS configuration
 	s.registerAnalyticsRoutes()
 
 	// Protected routes group

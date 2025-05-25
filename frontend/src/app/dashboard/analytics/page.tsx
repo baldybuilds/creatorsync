@@ -55,9 +55,11 @@ interface PerformanceData {
 
 interface VideoAnalytics {
     id: number;
+    video_id: string;
     title: string;
-    viewCount: number;
-    publishedAt: string;
+    video_type: string;
+    view_count: number;
+    published_at: string;
 }
 
 interface EnhancedAnalytics {
@@ -192,7 +194,7 @@ const ContentPerformanceChart = ({
         // Remove duplicates and prepare scatter data
         const uniqueContent = allContent.reduce((acc: ContentDataPoint[], video) => {
             if (!acc.find(v => v.id === video.id)) {
-                const publishDate = new Date(video.publishedAt);
+                const publishDate = new Date(video.published_at);
                 const daysSincePublish = Math.floor((Date.now() - publishDate.getTime()) / (1000 * 60 * 60 * 24));
                 
                 // Filter by time range
@@ -201,11 +203,11 @@ const ContentPerformanceChart = ({
                     acc.push({
                         id: video.id,
                         title: video.title,
-                        views: video.viewCount,
+                        views: video.view_count,
                         date: publishDate.getTime(),
                         displayDate: publishDate.toLocaleDateString(),
                         daysSince: daysSincePublish,
-                        type: video.title.toLowerCase().includes('clip') ? 'clip' : 'broadcast'
+                        type: video.video_type.toLowerCase().includes('clip') ? 'clip' : 'broadcast'
                     });
                 }
             }

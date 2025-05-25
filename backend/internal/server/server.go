@@ -20,6 +20,9 @@ type FiberServer struct {
 	db                      database.Service
 	analyticsHandlers       *analytics.Handlers
 	backgroundCollectionMgr *analytics.BackgroundCollectionManager
+	universalCollector      analytics.UniversalAnalyticsCollector
+	twitchOAuthHandlers     *twitch.TwitchOAuthHandlers
+	twitchTokenHelper       *twitch.TwitchTokenHelper
 }
 
 func New() (*FiberServer, error) {
@@ -27,7 +30,12 @@ func New() (*FiberServer, error) {
 		return nil, fmt.Errorf("failed to initialize Clerk client: %w", err)
 	}
 
-	db := database.New()
+	dbService, err := database.NewDatabaseService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize database service: %w", err)
+	}
+
+	standardDB := dbService.GetStandardDB()
 
 	// Initialize Twitch client
 	twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
@@ -41,20 +49,47 @@ func New() (*FiberServer, error) {
 		return nil, fmt.Errorf("failed to initialize Twitch client: %w", err)
 	}
 
-	// Initialize analytics components
-	analyticsService := analytics.NewService(db, twitchClient)
-	dataCollector := analytics.NewDataCollector(analytics.NewRepository(db), twitchClient)
-	backgroundMgr := analytics.NewBackgroundCollectionManager(dataCollector, db)
+	// Initialize analytics components with new universal system
+	analyticsRepo := analytics.NewRepository(standardDB)
+	universalCollector := analytics.NewUniversalAnalyticsCollector(standardDB, analyticsRepo)
+
+	// Register platform collectors
+	twitchCollector, err := analytics.NewTwitchCollector(standardDB, analyticsRepo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Twitch collector: %w", err)
+	}
+	universalCollector.RegisterPlatform(twitchCollector)
+
+	// Create backward-compatible collector for existing code
+	dataCollector := analytics.NewBackwardCompatibleCollector(universalCollector)
+
+	// Initialize other components
+	analyticsService := analytics.NewService(dbService, twitchClient)
+	backgroundMgr := analytics.NewBackgroundCollectionManager(dataCollector, standardDB)
 	analyticsHandlers := analytics.NewHandlers(analyticsService, backgroundMgr)
+
+	// Initialize Twitch OAuth components
+	twitchOAuthHandlers, err := twitch.NewTwitchOAuthHandlers(standardDB)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Twitch OAuth handlers: %w", err)
+	}
+
+	twitchTokenHelper, err := twitch.NewTwitchTokenHelper(standardDB)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Twitch token helper: %w", err)
+	}
 
 	server := &FiberServer{
 		App: fiber.New(fiber.Config{
 			ServerHeader: "creatorsync",
 			AppName:      "creatorsync",
 		}),
-		db:                      db,
+		db:                      standardDB,
 		analyticsHandlers:       analyticsHandlers,
 		backgroundCollectionMgr: backgroundMgr,
+		universalCollector:      universalCollector,
+		twitchOAuthHandlers:     twitchOAuthHandlers,
+		twitchTokenHelper:       twitchTokenHelper,
 	}
 
 	return server, nil

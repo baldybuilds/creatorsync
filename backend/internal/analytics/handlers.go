@@ -42,55 +42,10 @@ func (h *Handlers) getUserID(c *fiber.Ctx) (string, error) {
 	return user.ID, nil
 }
 
-// CORS middleware for analytics routes
-func (h *Handlers) corsMiddleware(c *fiber.Ctx) error {
-	// Add explicit CORS headers for all environments
-	origin := c.Get("Origin")
-	allowedOrigins := []string{
-		"https://dev.creatorsync.app", // Staging
-		"https://creatorsync.app",     // Production
-		"https://www.creatorsync.app", // Production www
-		"http://localhost:3000",       // Local development
-		"http://localhost:5173",       // Local Vite
-		"http://localhost:5174",       // Local Vite alt
-		"http://localhost:8080",       // Local Go server
-	}
-
-	// Check if origin is allowed
-	originAllowed := false
-	for _, allowed := range allowedOrigins {
-		if origin == allowed {
-			originAllowed = true
-			break
-		}
-	}
-
-	if originAllowed {
-		c.Set("Access-Control-Allow-Origin", origin)
-	} else {
-		// Default to localhost for development
-		c.Set("Access-Control-Allow-Origin", "http://localhost:3000")
-	}
-
-	c.Set("Access-Control-Allow-Credentials", "true")
-	c.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS,PATCH")
-	c.Set("Access-Control-Allow-Headers", "Accept,Authorization,Content-Type,X-Requested-With")
-
-	// Handle preflight requests
-	if c.Method() == "OPTIONS" {
-		return c.SendStatus(fiber.StatusOK)
-	}
-
-	return c.Next()
-}
-
 // RegisterRoutes registers all analytics routes
 func (h *Handlers) RegisterRoutes(app *fiber.App) {
 	// Create analytics API group that inherits from main app (with CORS)
 	api := app.Group("/api/analytics")
-
-	// Apply CORS middleware to all analytics routes
-	api.Use(h.corsMiddleware)
 
 	// Add a test endpoint to verify CORS is working
 	api.Get("/cors-test", func(c *fiber.Ctx) error {
@@ -149,67 +104,87 @@ func (h *Handlers) RegisterRoutes(app *fiber.App) {
 	protected.Post("/collect", h.TriggerDataCollection)
 	protected.Post("/refresh", h.RefreshChannelData)
 
-	// Debug endpoint to check data status
+	// Connection status endpoint
+	protected.Get("/connection-status", h.GetConnectionStatus)
+
+	// Debug endpoints
 	protected.Get("/debug/data-status", h.GetDataStatus)
+	protected.Get("/debug/cache-stats", h.GetCacheStats)
 
 }
 
 // GetDashboardOverview returns summary metrics for the dashboard
 func (h *Handlers) GetDashboardOverview(c *fiber.Ctx) error {
-	user, err := clerk.GetUserFromContext(c)
+	userID, err := h.getUserID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
 	}
-	userID := user.ID
 
-	// Ensure user exists in database before proceeding
-	analyticsRepo := NewRepository(h.service.(*service).db)
-	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), userID)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to verify user account",
-		})
+	// Check cache first
+	cache := GetAnalyticsCache()
+	if cachedData, found := cache.Get(userID, "overview"); found {
+		if response, ok := cachedData.(map[string]interface{}); ok {
+			c.Set("X-Cache-Status", "HIT")
+			return c.JSON(response)
+		} else if overview, ok := cachedData.(*DashboardOverview); ok {
+			// Legacy cache format - add connection status
+			twitchConnected, err := h.service.CheckTwitchConnection(c.Context(), userID)
+			if err != nil {
+				log.Printf("❌ Connection status check failed for user %s: %v", userID, err)
+				twitchConnected = false
+			}
+			response := map[string]interface{}{
+				"overview": overview,
+				"connection_status": map[string]interface{}{
+					"twitch_connected": twitchConnected,
+					"settings_url":     "/settings",
+				},
+			}
+			c.Set("X-Cache-Status", "HIT")
+			return c.JSON(response)
+		}
 	}
 
-	if existingUser == nil {
-		// Create minimal user record for cross-environment compatibility
-		user := &User{
-			ID:          userID,
-			ClerkUserID: userID,
-			Username:    fmt.Sprintf("user_%s", userID[len(userID)-10:]),
-			DisplayName: "User",
-			Email:       "",
-		}
-
-		if err := analyticsRepo.CreateOrUpdateUser(c.Context(), user); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to initialize user account",
-			})
-		}
+	// Check connection status
+	twitchConnected, err := h.service.CheckTwitchConnection(c.Context(), userID)
+	if err != nil {
+		log.Printf("❌ Connection status check failed for user %s: %v", userID, err)
+		twitchConnected = false
 	}
 
 	overview, err := h.service.GetDashboardOverview(c.Context(), userID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "Failed to get dashboard overview",
-			"details": err.Error(),
+			"error": "Failed to get dashboard overview",
 		})
 	}
 
-	return c.JSON(overview)
+	// Create response with connection status
+	response := map[string]interface{}{
+		"overview": overview,
+		"connection_status": map[string]interface{}{
+			"twitch_connected": twitchConnected,
+			"settings_url":     "/settings",
+		},
+	}
+
+	// Cache the result
+	cache.Set(userID, "overview", response, DashboardOverviewTTL)
+
+	c.Set("X-Cache-Status", "MISS")
+	return c.JSON(response)
 }
 
 // GetAnalyticsChartData returns chart data for analytics visualization
 func (h *Handlers) GetAnalyticsChartData(c *fiber.Ctx) error {
-	user, err := clerk.GetUserFromContext(c)
+	userID, err := h.getUserID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
 	}
-	userID := user.ID
 
 	// Get days parameter (default to 30)
 	daysStr := c.Query("days", "30")
@@ -218,14 +193,26 @@ func (h *Handlers) GetAnalyticsChartData(c *fiber.Ctx) error {
 		days = 30
 	}
 
+	// Check cache first
+	cache := GetAnalyticsCache()
+	if cachedData, found := cache.Get(userID, "chartdata", daysStr); found {
+		if chartData, ok := cachedData.(*AnalyticsChartData); ok {
+			c.Set("X-Cache-Status", "HIT")
+			return c.JSON(chartData)
+		}
+	}
+
 	chartData, err := h.service.GetAnalyticsChartData(c.Context(), userID, days)
 	if err != nil {
-		log.Printf("Error getting chart data for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to get chart data",
 		})
 	}
 
+	// Cache the result
+	cache.Set(userID, "chartdata", chartData, ChartDataTTL, daysStr)
+
+	c.Set("X-Cache-Status", "MISS")
 	return c.JSON(chartData)
 }
 
@@ -253,70 +240,10 @@ func (h *Handlers) GetDetailedAnalytics(c *fiber.Ctx) error {
 func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 	userID, err := h.getUserID(c)
 	if err != nil {
-		log.Printf("❌ GetEnhancedAnalytics: Failed to get user ID: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not authenticated",
 		})
 	}
-
-	// Get request ID for tracking
-	requestID := c.Query("requestId", fmt.Sprintf("server-%d", time.Now().UnixNano()))
-	log.Printf("🔍 GetEnhancedAnalytics: Starting for user %s (requestId: %s)", userID, requestID)
-
-	// Add comprehensive error recovery to prevent crashes
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("❌ GetEnhancedAnalytics: PANIC recovered for user %s (requestId: %s): %v", userID, requestID, r)
-			c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error":     "Internal server error",
-				"requestId": requestID,
-			})
-		}
-	}()
-
-	// Check for existing active request for this user
-	if existing, loaded := h.activeRequests.LoadOrStore(userID, &RequestInfo{
-		UserID:    userID,
-		StartTime: time.Now(),
-		RequestID: requestID,
-	}); loaded {
-		existingReq := existing.(*RequestInfo)
-		elapsed := time.Since(existingReq.StartTime)
-
-		// If there's a request that's been running for less than 30 seconds, reject this one
-		if elapsed < 30*time.Second {
-			log.Printf("🚫 GetEnhancedAnalytics: Rejecting duplicate request %s for user %s (existing: %s, elapsed: %v)",
-				requestID, userID, existingReq.RequestID, elapsed)
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
-				"error":       "Request already in progress",
-				"details":     fmt.Sprintf("Existing request %s started %v ago", existingReq.RequestID, elapsed),
-				"requestId":   requestID,
-				"retry_after": "30",
-			})
-		} else {
-			// Old request, replace it
-			log.Printf("🔄 GetEnhancedAnalytics: Replacing stale request for user %s (old: %s, new: %s)",
-				userID, existingReq.RequestID, requestID)
-			h.activeRequests.Store(userID, &RequestInfo{
-				UserID:    userID,
-				StartTime: time.Now(),
-				RequestID: requestID,
-			})
-		}
-	}
-
-	// Ensure cleanup happens regardless of how the function exits
-	defer func() {
-		h.activeRequests.Delete(userID)
-		log.Printf("🧹 GetEnhancedAnalytics: Cleaned up active request for user %s (requestId: %s)", userID, requestID)
-	}()
-
-	// Create a context with shorter timeout to prevent hanging
-	ctx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
-	defer cancel()
-
-	// Simplified database health check to prevent blocking
-	log.Printf("🔍 GetEnhancedAnalytics: Checking database health for request %s", requestID)
 
 	// Get days parameter (default to 30)
 	daysStr := c.Query("days", "30")
@@ -325,76 +252,109 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		days = 30
 	}
 
-	log.Printf("📊 GetEnhancedAnalytics: Fetching analytics for user %s (days: %d, requestId: %s)", userID, days, requestID)
-
-	// Try to get analytics with comprehensive error handling
-	var analytics *EnhancedAnalytics
-	var analyticsErr error
-
-	// Single attempt with better error handling
-	startTime := time.Now()
-
-	// Wrap the service call in error recovery
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("❌ GetEnhancedAnalytics: Service call panic for user %s (requestId: %s): %v", userID, requestID, r)
-				analyticsErr = fmt.Errorf("service panic: %v", r)
+	// Check cache first
+	cache := GetAnalyticsCache()
+	if cachedData, found := cache.Get(userID, "enhanced", daysStr); found {
+		// Handle both old and new cache formats for compatibility
+		if response, ok := cachedData.(map[string]interface{}); ok {
+			c.Set("Cache-Control", "private, max-age=300") // 5 minutes
+			c.Set("X-Cache-Status", "HIT")
+			return c.JSON(response)
+		} else if analytics, ok := cachedData.(*EnhancedAnalytics); ok {
+			// Legacy cache format - add connection status
+			twitchConnected, err := h.service.CheckTwitchConnection(c.Context(), userID)
+			if err != nil {
+				log.Printf("❌ Connection status check failed for user %s: %v", userID, err)
+				twitchConnected = false
 			}
-		}()
+			response := map[string]interface{}{
+				"analytics": analytics,
+				"connection_status": map[string]interface{}{
+					"twitch_connected": twitchConnected,
+					"settings_url":     "/settings",
+				},
+			}
+			c.Set("Cache-Control", "private, max-age=300") // 5 minutes
+			c.Set("X-Cache-Status", "HIT")
+			return c.JSON(response)
+		}
+	}
 
-		analytics, analyticsErr = h.service.GetEnhancedAnalytics(ctx, userID, days)
+	// Check for concurrent requests to prevent duplicate API calls
+	requestKey := fmt.Sprintf("enhanced_%s_%d", userID, days)
+	if existing, loaded := h.activeRequests.LoadOrStore(requestKey, &RequestInfo{
+		UserID:    userID,
+		StartTime: time.Now(),
+		RequestID: fmt.Sprintf("req_%d", time.Now().UnixNano()),
+	}); loaded {
+		existingReq := existing.(*RequestInfo)
+		elapsed := time.Since(existingReq.StartTime)
+
+		// If there's a recent request, return 429 with shorter retry time
+		if elapsed < 10*time.Second {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error":       "Request in progress",
+				"retry_after": "10",
+			})
+		}
+		// Replace stale request
+		h.activeRequests.Store(requestKey, &RequestInfo{
+			UserID:    userID,
+			StartTime: time.Now(),
+			RequestID: fmt.Sprintf("req_%d", time.Now().UnixNano()),
+		})
+	}
+
+	defer func() {
+		h.activeRequests.Delete(requestKey)
 	}()
 
-	duration := time.Since(startTime)
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
+	defer cancel()
 
-	if analyticsErr != nil {
-		log.Printf("❌ GetEnhancedAnalytics: Failed for user %s (requestId: %s, duration: %v): %v", userID, requestID, duration, analyticsErr)
+	// Check connection status
+	twitchConnected, err := h.service.CheckTwitchConnection(ctx, userID)
+	if err != nil {
+		log.Printf("❌ Connection status check failed for user %s: %v", userID, err)
+		twitchConnected = false
+	}
 
-		// Return a proper error response instead of letting it crash
+	// Clear any cached analytics data before fetching fresh data
+	// This ensures we get the latest data after data collection
+	cache.InvalidateUserDataType(userID, "enhanced")
+
+	// Fetch data from service
+	analytics, err := h.service.GetEnhancedAnalytics(ctx, userID, days)
+	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":     "Failed to get enhanced analytics",
-			"details":   analyticsErr.Error(),
-			"requestId": requestID,
+			"error": "Failed to get enhanced analytics",
 		})
 	}
 
-	// Handle case where analytics is nil but no error
 	if analytics == nil {
-		log.Printf("⚠️ GetEnhancedAnalytics: Nil analytics returned for user %s (requestId: %s)", userID, requestID)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":     "No analytics data available",
-			"requestId": requestID,
+			"error": "No analytics data available",
 		})
 	}
 
-	log.Printf("✅ GetEnhancedAnalytics: Successfully retrieved analytics for user %s (requestId: %s, duration: %v)", userID, requestID, duration)
-
-	// Add comprehensive logging before response
-	log.Printf("📊 GetEnhancedAnalytics: Response data for %s (requestId: %s) - Videos: %d total, Followers: %d, Views: %d",
-		userID, requestID, analytics.Overview.VideoCount, analytics.Overview.CurrentFollowers, analytics.Overview.TotalViews)
-	log.Printf("📊 GetEnhancedAnalytics: Response arrays for %s (requestId: %s) - Top videos: %d, Recent videos: %d",
-		userID, requestID, len(analytics.TopVideos), len(analytics.RecentVideos))
-
-	// Try to send the JSON response with error handling
-	log.Printf("📤 GetEnhancedAnalytics: Sending JSON response for user %s (requestId: %s)", userID, requestID)
-
-	// Set additional response headers
-	c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	c.Set("Pragma", "no-cache")
-	c.Set("Expires", "0")
-	c.Set("X-Request-ID", requestID)
-
-	if err := c.JSON(analytics); err != nil {
-		log.Printf("❌ GetEnhancedAnalytics: Failed to send JSON response for user %s (requestId: %s): %v", userID, requestID, err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":     "Failed to serialize response",
-			"requestId": requestID,
-		})
+	// Add connection status to response
+	response := map[string]interface{}{
+		"analytics": analytics,
+		"connection_status": map[string]interface{}{
+			"twitch_connected": twitchConnected,
+			"settings_url":     "/settings",
+		},
 	}
 
-	log.Printf("✅ GetEnhancedAnalytics: Successfully sent response for user %s (requestId: %s, total duration: %v)", userID, requestID, time.Since(startTime))
-	return nil
+	// Cache the result (cache the full response including connection status)
+	cache.Set(userID, "enhanced", response, EnhancedAnalyticsTTL, daysStr)
+
+	// Set cache headers
+	c.Set("Cache-Control", "private, max-age=300") // 5 minutes
+	c.Set("X-Cache-Status", "MISS")
+
+	return c.JSON(response)
 }
 
 // GetGrowthAnalysis provides growth trend analysis
@@ -451,11 +411,54 @@ func (h *Handlers) TriggerDataCollection(c *fiber.Ctx) error {
 		})
 	}
 
-	// Trigger data collection in background
-	h.backgroundCollectionMgr.TriggerUserCollection(userID)
+	// Check if there's already a collection in progress for this user
+	requestKey := fmt.Sprintf("collection_%s", userID)
+	if _, loaded := h.activeRequests.LoadOrStore(requestKey, &RequestInfo{
+		UserID:    userID,
+		StartTime: time.Now(),
+		RequestID: fmt.Sprintf("collect_%d", time.Now().UnixNano()),
+	}); loaded {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "Data collection already in progress for this user",
+		})
+	}
 
+	// Ensure cleanup
+	defer h.activeRequests.Delete(requestKey)
+
+	// Invalidate cache since we're refreshing data
+	cache := GetAnalyticsCache()
+	cache.InvalidateUser(userID)
+
+	log.Printf("🚀 Starting manual data collection for user %s", userID)
+
+	// Create context with timeout for the collection process
+	ctx, cancel := context.WithTimeout(c.Context(), 4*time.Minute)
+	defer cancel()
+
+	// Use service method directly for better control and error handling
+	err = h.service.TriggerDataCollection(ctx, userID)
+	if err != nil {
+		log.Printf("❌ Data collection failed for user %s: %v", userID, err)
+
+		// Check if it's a partial failure (some data was collected)
+		if err.Error() != "failed to save any videos" {
+			return c.Status(fiber.StatusPartialContent).JSON(fiber.Map{
+				"message":   "Data collection completed with some errors",
+				"warning":   err.Error(),
+				"user_id":   userID,
+				"timestamp": time.Now().Unix(),
+			})
+		}
+
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fmt.Sprintf("Data collection failed: %v", err),
+		})
+	}
+
+	log.Printf("✅ Data collection completed successfully for user %s", userID)
 	return c.JSON(fiber.Map{
-		"message":   "Data collection triggered successfully",
+		"message":   "Data collection completed successfully",
 		"user_id":   userID,
 		"timestamp": time.Now().Unix(),
 	})
@@ -470,9 +473,12 @@ func (h *Handlers) RefreshChannelData(c *fiber.Ctx) error {
 		})
 	}
 
+	// Invalidate cache since we're refreshing data
+	cache := GetAnalyticsCache()
+	cache.InvalidateUser(userID)
+
 	err = h.service.RefreshChannelData(c.Context(), userID)
 	if err != nil {
-		log.Printf("Error refreshing channel data for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to refresh channel data",
 		})
@@ -538,23 +544,20 @@ func (h *Handlers) GetDataStatus(c *fiber.Ctx) error {
 		"errors": []string{},
 	}
 
-	// Check database health
-	if health := h.service.(*service).db.Health(); health["status"] == "up" {
+	// Check service health
+	if h.service.IsHealthy() {
 		status["database_health"] = "healthy"
 	} else {
 		status["database_health"] = "unhealthy"
-		if errorMsg, exists := health["error"]; exists {
-			status["errors"] = append(status["errors"].([]string), fmt.Sprintf("Database: %v", errorMsg))
-		}
+		status["errors"] = append(status["errors"].([]string), "Database connection unhealthy")
 	}
 
-	// Check if user exists
-	analyticsRepo := NewRepository(h.service.(*service).db)
-	existingUser, err := analyticsRepo.GetUserByClerkID(c.Context(), userID)
+	// Check if user has analytics data (simplified check)
+	hasData, _, err := h.service.CheckUserAnalyticsData(c.Context(), userID)
 	if err != nil {
-		status["errors"] = append(status["errors"].([]string), fmt.Sprintf("User lookup failed: %v", err))
-	} else if existingUser != nil {
-		status["user_exists"] = true
+		status["errors"] = append(status["errors"].([]string), fmt.Sprintf("User data check failed: %v", err))
+	} else {
+		status["user_exists"] = hasData
 	}
 
 	// Check analytics data
@@ -570,6 +573,75 @@ func (h *Handlers) GetDataStatus(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(status)
+}
+
+// GetConnectionStatus returns the user's platform connection status
+func (h *Handlers) GetConnectionStatus(c *fiber.Ctx) error {
+	userID, err := h.getUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "User not authenticated",
+		})
+	}
+
+	// Check cache first for connection status
+	cache := GetAnalyticsCache()
+	cacheKey := "connection_status"
+	if cachedData, found := cache.Get(userID, cacheKey); found {
+		if status, ok := cachedData.(map[string]interface{}); ok {
+			c.Set("X-Cache-Status", "HIT")
+			return c.JSON(status)
+		}
+	}
+
+	// Check Twitch connection using the universal collector
+	connected, err := h.service.CheckTwitchConnection(c.Context(), userID)
+	if err != nil {
+		log.Printf("❌ Connection status check failed for user %s: %v", userID, err)
+		connected = false // Default to false on error
+	}
+
+	status := map[string]interface{}{
+		"user_id": userID,
+		"platforms": map[string]interface{}{
+			"twitch": map[string]interface{}{
+				"connected":    connected,
+				"display_name": "Twitch",
+				"color":        "#9146FF",
+			},
+			"youtube": map[string]interface{}{
+				"connected":    false,
+				"display_name": "YouTube",
+				"color":        "#FF0000",
+				"coming_soon":  true,
+			},
+			"tiktok": map[string]interface{}{
+				"connected":    false,
+				"display_name": "TikTok",
+				"color":        "#000000",
+				"coming_soon":  true,
+			},
+		},
+		"has_any_connection": connected,
+		"settings_url":       "/settings",
+	}
+
+	// Cache the result for 2 minutes (connection status can change)
+	cache.Set(userID, cacheKey, status, 2*time.Minute)
+
+	c.Set("X-Cache-Status", "MISS")
+	return c.JSON(status)
+}
+
+// GetCacheStats returns cache statistics for monitoring
+func (h *Handlers) GetCacheStats(c *fiber.Ctx) error {
+	cache := GetAnalyticsCache()
+	stats := cache.GetCacheStats()
+
+	return c.JSON(fiber.Map{
+		"cache_stats": stats,
+		"timestamp":   time.Now().Unix(),
+	})
 }
 
 // HealthCheck returns the health status of the analytics service

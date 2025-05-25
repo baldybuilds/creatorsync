@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '@clerk/nextjs';
+import { ConnectionModal } from '@/components/ui/connection-modal';
 import {
     TrendingUp,
     Eye,
@@ -12,16 +13,7 @@ import {
     Heart,
     Users
 } from 'lucide-react';
-import {
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    ResponsiveContainer,
-    ScatterChart,
-    Scatter,
-    Cell
-} from 'recharts';
+// Recharts no longer needed for the content stream design
 import React from 'react';
 
 // Enhanced types for new dashboard design
@@ -34,6 +26,11 @@ interface VideoBasedOverview {
     currentSubscribers: number;
     followerChange: number;
     subscriberChange: number;
+}
+
+interface ConnectionStatus {
+    twitch_connected: boolean;
+    settings_url: string;
 }
 
 interface ChartDataPoint {
@@ -68,6 +65,8 @@ interface EnhancedAnalytics {
     topVideos: VideoAnalytics[];
     recentVideos: VideoAnalytics[];
 }
+
+
 
 interface ContentDataPoint {
     id: number;
@@ -164,7 +163,7 @@ const TimePeriodSelector = ({
     </div>
 );
 
-// Content Performance Timeline Chart
+// Content Performance Stream - Modern Interactive Timeline
 const ContentPerformanceChart = ({
     analytics,
     timeRange,
@@ -174,91 +173,102 @@ const ContentPerformanceChart = ({
     timeRange: string;
     onTimeRangeChange: (period: string) => void;
 }) => {
-    // Prepare data for scatter plot
+    // Prepare data for the content stream
     const contentData = React.useMemo(() => {
         if (!analytics) return [];
-        
-        // Get all available content data from different sources
+
         const allContent = [
             ...(analytics.topVideos || []),
             ...(analytics.recentVideos || [])
         ];
-        
-        console.log(`📊 ContentPerformanceChart: Processing ${allContent.length} total videos for ${timeRange} days`);
-        
-        // If we don't have video arrays, but have video count in overview, show helpful message
+
         if (allContent.length === 0 && analytics.overview?.videoCount > 0) {
-            console.log(`⚠️ ContentPerformanceChart: No video arrays but ${analytics.overview.videoCount} videos in overview`);
             return [];
         }
+
+        // Create a Map to ensure truly unique content by video_id
+        // Note: Backend already filters by date range, so no need to filter again here
+        const uniqueContentMap = new Map<string, ContentDataPoint>();
         
-        // Remove duplicates and prepare scatter data
-        const uniqueContent = allContent.reduce((acc: ContentDataPoint[], video) => {
-            if (!acc.find(v => v.id === video.id)) {
+        allContent.forEach(video => {
+            const publishDate = new Date(video.published_at);
+            const daysSincePublish = Math.floor((Date.now() - publishDate.getTime()) / (1000 * 60 * 60 * 24));
+
+            const contentPoint: ContentDataPoint = {
+                id: video.id,
+                title: video.title,
+                views: video.view_count,
+                date: publishDate.getTime(),
+                displayDate: publishDate.toLocaleDateString(),
+                daysSince: daysSincePublish,
+                type: video.video_type.toLowerCase().includes('clip') ? 'clip' : 'broadcast'
+            };
+            
+            // Use video_id as key to prevent duplicates, keep the one with more views if duplicate
+            const key = `${video.video_id}-${video.id}`;
+            const existing = uniqueContentMap.get(key);
+            if (!existing || contentPoint.views > existing.views) {
+                uniqueContentMap.set(key, contentPoint);
+            }
+        });
+
+        const uniqueContent = Array.from(uniqueContentMap.values());
+
+        if (uniqueContent.length === 0 && allContent.length > 0) {
+            const recentContentMap = new Map<string, ContentDataPoint>();
+            
+            allContent.slice(0, 10).forEach(video => {
                 const publishDate = new Date(video.published_at);
                 const daysSincePublish = Math.floor((Date.now() - publishDate.getTime()) / (1000 * 60 * 60 * 24));
-                
-                console.log(`📹 Video: "${video.title}" published ${daysSincePublish} days ago (${publishDate.toLocaleDateString()})`);
-                
-                // More flexible time range filtering - if no content in range, show all content
-                const timeRangeNum = parseInt(timeRange);
-                const shouldInclude = daysSincePublish <= timeRangeNum;
-                
-                if (shouldInclude) {
-                    acc.push({
-                        id: video.id,
-                        title: video.title,
-                        views: video.view_count,
-                        date: publishDate.getTime(),
-                        displayDate: publishDate.toLocaleDateString(),
-                        daysSince: daysSincePublish,
-                        type: video.video_type.toLowerCase().includes('clip') ? 'clip' : 'broadcast'
-                    });
-                    console.log(`✅ Video included: "${video.title}" (${daysSincePublish} days <= ${timeRangeNum})`);
-                } else {
-                    console.log(`❌ Video filtered out: "${video.title}" (${daysSincePublish} days > ${timeRangeNum})`);
+
+                const contentPoint: ContentDataPoint = {
+                    id: video.id,
+                    title: video.title,
+                    views: video.view_count,
+                    date: publishDate.getTime(),
+                    displayDate: publishDate.toLocaleDateString(),
+                    daysSince: daysSincePublish,
+                    type: video.video_type.toLowerCase().includes('clip') ? 'clip' : 'broadcast'
+                };
+
+                const key = `${video.video_id}-${video.id}`;
+                const existing = recentContentMap.get(key);
+                if (!existing || contentPoint.views > existing.views) {
+                    recentContentMap.set(key, contentPoint);
                 }
-            }
-            return acc;
-        }, []);
-        
-        // If no content in the time range, show the most recent content anyway
-        if (uniqueContent.length === 0 && allContent.length > 0) {
-            console.log(`🔄 No content in ${timeRange} day range, showing most recent content instead`);
-            
-            // Take the 10 most recent videos regardless of date
-            const recentContent = allContent
-                .slice(0, 10)
-                .map(video => {
-                    const publishDate = new Date(video.published_at);
-                    const daysSincePublish = Math.floor((Date.now() - publishDate.getTime()) / (1000 * 60 * 60 * 24));
-                    
-                    return {
-                        id: video.id,
-                        title: video.title,
-                        views: video.view_count,
-                        date: publishDate.getTime(),
-                        displayDate: publishDate.toLocaleDateString(),
-                        daysSince: daysSincePublish,
-                        type: video.video_type.toLowerCase().includes('clip') ? 'clip' : 'broadcast'
-                    };
-                });
-            
-            console.log(`📊 Showing ${recentContent.length} recent videos instead`);
+            });
+
+            const recentContent = Array.from(recentContentMap.values());
             return recentContent.sort((a, b) => a.date - b.date);
         }
-        
-        console.log(`📊 Final content data: ${uniqueContent.length} videos`);
+
         return uniqueContent.sort((a, b) => a.date - b.date);
     }, [analytics, timeRange]);
 
-    const getContentColor = (type: string) => {
-        return type === 'clip' ? '#10b981' : '#3b82f6'; // Green for clips, blue for broadcasts
+
+
+    const maxViews = contentData.length > 0 ? Math.max(...contentData.map(d => d.views)) : 0;
+    const averageViews = contentData.length > 0
+        ? contentData.reduce((sum, item) => sum + item.views, 0) / contentData.length
+        : 0;
+
+    // Performance tiers for visual distinction
+    const getPerformanceTier = (views: number) => {
+        if (views >= averageViews * 1.5) return 'excellent';
+        if (views >= averageViews) return 'good';
+        if (views >= averageViews * 0.5) return 'average';
+        return 'needs-work';
     };
 
-    const averageViews = contentData.length > 0 
-        ? contentData.reduce((sum, item) => sum + item.views, 0) / contentData.length 
-        : 0;
+    const getPerformanceColor = (tier: string) => {
+        switch (tier) {
+            case 'excellent': return 'from-emerald-400 to-green-600';
+            case 'good': return 'from-blue-400 to-cyan-600';
+            case 'average': return 'from-yellow-400 to-orange-500';
+            case 'needs-work': return 'from-gray-400 to-gray-600';
+            default: return 'from-gray-400 to-gray-600';
+        }
+    };
 
     return (
         <motion.div
@@ -268,114 +278,153 @@ const ContentPerformanceChart = ({
         >
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h3 className="text-xl font-bold text-white">Content Performance Timeline</h3>
-                    <p className="text-sm text-gray-400 mt-1">See which content resonates with your audience</p>
+                    <h3 className="text-xl font-bold text-white">Content Performance Stream</h3>
+                    <p className="text-sm text-gray-400 mt-1">Navigate your content journey • Track what resonates</p>
                 </div>
                 <TimePeriodSelector selected={timeRange} onSelect={onTimeRangeChange} />
             </div>
-            
+
             {contentData.length > 0 ? (
                 <>
-                    <div className="h-80 mb-4">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <ScatterChart data={contentData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                                <XAxis
-                                    type="number"
-                                    dataKey="date"
-                                    scale="time"
-                                    domain={['dataMin', 'dataMax']}
-                                    stroke="#9ca3af"
-                                    fontSize={12}
-                                    tickFormatter={(timestamp) => {
-                                        const date = new Date(timestamp);
-                                        return `${date.getMonth() + 1}/${date.getDate()}`;
-                                    }}
-                                />
-                                <YAxis
-                                    stroke="#9ca3af"
-                                    fontSize={12}
-                                    tickFormatter={(value) => formatNumber(value)}
-                                />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: '#1f2937',
-                                        border: '1px solid #374151',
-                                        borderRadius: '8px',
-                                        color: '#fff'
-                                    }}
-                                    formatter={(value: number) => [
-                                        `${formatNumber(value)} views`,
-                                        'Content'
-                                    ]}
-                                    labelFormatter={(label: string, payload: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-                                        if (payload && payload[0] && payload[0].payload) {
-                                            const data = payload[0].payload;
-                                            return `${data.title} (${data.displayDate})`;
-                                        }
-                                        return label;
-                                    }}
-                                />
-                                <Scatter dataKey="views" fill="#8884d8">
-                                    {contentData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={getContentColor(entry.type)} />
-                                    ))}
-                                </Scatter>
-                                {/* Average line */}
-                                {averageViews > 0 && (
-                                    <line
-                                        x1="0"
-                                        y1={`${100 - (averageViews / Math.max(...contentData.map(d => d.views))) * 100}%`}
-                                        x2="100%"
-                                        y2={`${100 - (averageViews / Math.max(...contentData.map(d => d.views))) * 100}%`}
-                                        stroke="#f59e0b"
-                                        strokeDasharray="5,5"
-                                        strokeWidth={2}
-                                        opacity={0.7}
-                                    />
-                                )}
-                            </ScatterChart>
-                        </ResponsiveContainer>
-                    </div>
-                    
-                    {/* Legend and Insights */}
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center space-x-6">
-                            <div className="flex items-center">
-                                <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
-                                <span className="text-sm text-gray-400">Broadcasts</span>
-                            </div>
-                            <div className="flex items-center">
-                                <div className="w-3 h-3 bg-emerald-500 rounded-full mr-2"></div>
-                                <span className="text-sm text-gray-400">Clips</span>
-                            </div>
-                            <div className="flex items-center">
-                                <div className="w-3 h-3 border-2 border-yellow-500 border-dashed rounded mr-2"></div>
-                                <span className="text-sm text-gray-400">Average ({formatNumber(averageViews)} views)</span>
-                            </div>
+                    {/* Content Stream Timeline */}
+                    <div className="relative">
+                        {/* Timeline River */}
+                        <div className="absolute left-8 top-0 bottom-0 w-1 bg-gradient-to-b from-emerald-500/30 via-blue-500/30 to-purple-500/30 rounded-full"></div>
+                        
+                        {/* Content Bubbles */}
+                        <div className="space-y-6 relative z-10">
+                            {contentData.map((content, index) => {
+                                const tier = getPerformanceTier(content.views);
+                                const sizeMultiplier = Math.max(0.6, Math.min(1.4, content.views / maxViews * 1.2 + 0.4));
+                                
+                                return (
+                                    <motion.div
+                                        key={`content-${content.id}-${index}`}
+                                        initial={{ x: -100, opacity: 0 }}
+                                        animate={{ x: 0, opacity: 1 }}
+                                        transition={{ delay: index * 0.1 }}
+                                        className="flex items-center gap-6 group"
+                                    >
+                                        {/* Timeline Node */}
+                                        <div className="relative flex-shrink-0">
+                                            <div 
+                                                className={`w-6 h-6 rounded-full bg-gradient-to-br ${getPerformanceColor(tier)} shadow-lg border-2 border-gray-800 transition-all duration-300 group-hover:scale-125 group-hover:shadow-xl`}
+                                                style={{ transform: `scale(${sizeMultiplier})` }}
+                                            >
+                                                <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent rounded-full"></div>
+                                            </div>
+                                            
+                                            {/* Performance indicator ring */}
+                                            {tier === 'excellent' && (
+                                                <div className="absolute -inset-2 border-2 border-emerald-400/30 rounded-full animate-pulse"></div>
+                                            )}
+                                        </div>
+
+                                        {/* Content Card */}
+                                        <motion.div
+                                            whileHover={{ scale: 1.02, y: -2 }}
+                                            className={`flex-1 bg-gradient-to-r ${
+                                                content.type === 'clip' 
+                                                    ? 'from-emerald-900/30 to-emerald-800/20 border-emerald-500/20' 
+                                                    : 'from-blue-900/30 to-blue-800/20 border-blue-500/20'
+                                            } border rounded-xl p-4 backdrop-blur-sm transition-all duration-300 group-hover:shadow-lg cursor-pointer`}
+                                        >
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                                            content.type === 'clip' 
+                                                                ? 'bg-emerald-500/20 text-emerald-300' 
+                                                                : 'bg-blue-500/20 text-blue-300'
+                                                        }`}>
+                                                            {content.type === 'clip' ? '🎬 Clip' : '📺 Broadcast'}
+                                                        </span>
+                                                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${
+                                                            tier === 'excellent' ? 'bg-emerald-500/20 text-emerald-300' :
+                                                            tier === 'good' ? 'bg-blue-500/20 text-blue-300' :
+                                                            tier === 'average' ? 'bg-yellow-500/20 text-yellow-300' :
+                                                            'bg-gray-500/20 text-gray-300'
+                                                        }`}>
+                                                            {tier === 'excellent' ? '🔥 Hot' :
+                                                             tier === 'good' ? '✨ Good' :
+                                                             tier === 'average' ? '📈 Average' :
+                                                             '💭 Potential'}
+                                                        </span>
+                                                    </div>
+                                                    
+                                                    <h4 className="text-white font-semibold text-sm group-hover:text-emerald-300 transition-colors line-clamp-2">
+                                                        {content.title}
+                                                    </h4>
+                                                    
+                                                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                                                        <span>📅 {content.displayDate}</span>
+                                                        <span>⏰ {content.daysSince} days ago</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Performance metrics */}
+                                                <div className="text-right">
+                                                    <div className="text-2xl font-bold text-white mb-1">
+                                                        {formatNumber(content.views)}
+                                                    </div>
+                                                    <div className="text-xs text-gray-400">views</div>
+                                                    
+                                                    {/* Performance bar */}
+                                                    <div className="w-16 h-1 bg-gray-700 rounded-full mt-2 overflow-hidden">
+                                                        <div 
+                                                            className={`h-full bg-gradient-to-r ${getPerformanceColor(tier)} transition-all duration-500`}
+                                                            style={{ width: `${Math.min(100, (content.views / maxViews) * 100)}%` }}
+                                                        ></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    </motion.div>
+                                );
+                            })}
                         </div>
-                        <div className="text-right">
-                            <p className="text-sm text-gray-400">
-                                {contentData.length} pieces of content 
-                                {contentData.length > 0 && analytics && 
-                                 analytics.topVideos && analytics.recentVideos &&
-                                 (analytics.topVideos.length > 0 || analytics.recentVideos.length > 0) ? 
-                                    ` in last ${timeRange} days` : 
-                                    '(showing recent content)'
-                                }
-                            </p>
+
+                        {/* Stream Flow Animation */}
+                        <div className="absolute left-8 top-0 bottom-0 w-1 opacity-50">
+                            <div className="w-full h-8 bg-gradient-to-b from-emerald-400 to-transparent animate-pulse"></div>
                         </div>
                     </div>
+
+                    {/* Performance Summary */}
+                    <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {[
+                            { label: 'Total Content', value: contentData.length, icon: '📚', color: 'text-purple-400' },
+                            { label: 'Avg Performance', value: formatNumber(averageViews), icon: '📊', color: 'text-blue-400' },
+                            { label: 'Top Performer', value: formatNumber(maxViews), icon: '🏆', color: 'text-yellow-400' },
+                            { label: 'Clips vs Broadcasts', value: `${contentData.filter(d => d.type === 'clip').length}:${contentData.filter(d => d.type === 'broadcast').length}`, icon: '⚖️', color: 'text-emerald-400' }
+                        ].map((stat, index) => (
+                                                         <motion.div
+                                key={`stat-${stat.label}-${index}`}
+                                initial={{ y: 20, opacity: 0 }}
+                                animate={{ y: 0, opacity: 1 }}
+                                transition={{ delay: 0.5 + index * 0.1 }}
+                                className="bg-gray-800/30 rounded-xl p-4 text-center hover:bg-gray-800/50 transition-all duration-300"
+                            >
+                                <div className={`text-2xl mb-2 ${stat.color}`}>{stat.icon}</div>
+                                <div className="text-xl font-bold text-white">{stat.value}</div>
+                                <div className="text-xs text-gray-400">{stat.label}</div>
+                            </motion.div>
+                        ))}
+                    </div>
+
+
                 </>
             ) : (
-                <div className="text-center py-12">
-                    <Video className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <div className="text-center py-16">
+                    <div className="w-16 h-16 bg-gradient-to-br from-emerald-500/20 to-blue-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Video className="w-8 h-8 text-emerald-400" />
+                    </div>
                     {analytics?.overview?.videoCount && analytics.overview.videoCount > 0 ? (
                         <>
-                            <h4 className="text-lg font-medium text-gray-300 mb-2">Content Timeline Loading</h4>
-                            <p className="text-gray-400">
-                                We found {analytics.overview.videoCount} videos with {formatNumber(analytics.overview.totalViews)} total views, 
-                                but detailed video data is still being processed.
+                            <h4 className="text-lg font-medium text-gray-300 mb-2">Content Stream Loading</h4>
+                            <p className="text-gray-400 max-w-md mx-auto">
+                                We found {analytics.overview.videoCount} videos with {formatNumber(analytics.overview.totalViews)} total views.
+                                Your content stream will appear here once processing is complete.
                             </p>
                             <p className="text-gray-500 text-sm mt-2">
                                 Try clicking "Update Data" to refresh your content details.
@@ -384,7 +433,7 @@ const ContentPerformanceChart = ({
                     ) : (
                         <>
                             <h4 className="text-lg font-medium text-gray-300 mb-2">No content in this period</h4>
-                            <p className="text-gray-400">Try a longer time range or create more content!</p>
+                            <p className="text-gray-400">Start creating content to see your performance stream!</p>
                         </>
                     )}
                 </div>
@@ -396,22 +445,24 @@ const ContentPerformanceChart = ({
 export default function AnalyticsPage() {
     const { isLoaded, isSignedIn, getToken } = useAuth();
     const [analytics, setAnalytics] = useState<EnhancedAnalytics | null>(null);
+    const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [timeRange, setTimeRange] = useState('30');
-    
+    const [timeRange, setTimeRange] = useState('7');
+    const [showConnectionModal, setShowConnectionModal] = useState(false);
+
     // Add request deduplication
     const [isRequestInProgress, setIsRequestInProgress] = useState(false);
     const [lastRequestId, setLastRequestId] = useState<string | null>(null);
+
+
 
     // Helper function to get API base URL based on environment
     const getApiBaseUrl = () => {
         const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
         const nodeEnv = process.env.NODE_ENV;
         const appEnv = process.env.NEXT_PUBLIC_APP_ENV;
-        
-        console.log('Environment detection:', { hostname, nodeEnv, appEnv });
-        
+
         let apiUrl = '';
         if (hostname === 'dev.creatorsync.app') {
             apiUrl = 'https://api-dev.creatorsync.app';
@@ -422,25 +473,21 @@ export default function AnalyticsPage() {
         } else {
             apiUrl = 'http://localhost:8080';
         }
-        
-        console.log('Selected API URL:', apiUrl);
+
         return apiUrl;
     };
 
     // Test API connectivity
     const testApiConnectivity = async (apiBaseUrl: string) => {
         try {
-            console.log('Testing API connectivity to:', apiBaseUrl);
             const response = await fetch(`${apiBaseUrl}/api/analytics/health`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
                 },
             });
-            
+
             if (response.ok) {
-                const data = await response.json();
-                console.log('API health check successful:', data);
                 return true;
             } else {
                 console.error('API health check failed with status:', response.status);
@@ -452,24 +499,73 @@ export default function AnalyticsPage() {
         }
     };
 
+    // Check connection status separately
+    const checkConnectionStatus = useCallback(async () => {
+        if (!isLoaded || !isSignedIn) return;
+
+        try {
+            const token = await getToken();
+            const apiBaseUrl = getApiBaseUrl();
+
+            const response = await fetch(`${apiBaseUrl}/api/analytics/connection-status`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const isConnected = data.platforms?.twitch?.connected || false;
+                setConnectionStatus({
+                    twitch_connected: isConnected,
+                    settings_url: data.settings_url || '/settings'
+                });
+                return isConnected;
+            } else {
+                console.error('Failed to check connection status:', response.status);
+                // Default to disconnected if we can't check
+                setConnectionStatus({
+                    twitch_connected: false,
+                    settings_url: '/settings'
+                });
+                return false;
+            }
+        } catch (error) {
+            console.error('Connection status check failed:', error);
+            // Default to disconnected if we can't check
+            setConnectionStatus({
+                twitch_connected: false,
+                settings_url: '/settings'
+            });
+            return false;
+        }
+    }, [isLoaded, isSignedIn, getToken]);
+
     // Fetch enhanced analytics data with request deduplication
     const fetchAnalyticsData = useCallback(async (forceRefresh = false) => {
         if (!isLoaded || !isSignedIn) return;
 
+        // Always check connection status first
+        const isConnected = await checkConnectionStatus();
+
+        // If not connected, stop here - the UI will show the connection prompt
+        if (!isConnected) {
+            setLoading(false);
+            return;
+        }
+
         // Prevent concurrent requests unless forced refresh
         if (isRequestInProgress && !forceRefresh) {
-            console.log('Request already in progress, skipping...');
             return;
         }
 
         const requestId = `${Date.now()}-${Math.random()}`;
-        console.log(`Starting analytics request ${requestId}`);
 
         // Check if this is a duplicate request within 1 second
         if (lastRequestId && !forceRefresh) {
             const timeSinceLastRequest = Date.now() - parseInt(lastRequestId.split('-')[0]);
             if (timeSinceLastRequest < 1000) {
-                console.log('Duplicate request detected, skipping...');
                 return;
             }
         }
@@ -490,7 +586,6 @@ export default function AnalyticsPage() {
 
             // Sync user to ensure they exist in the database with improved error handling
             try {
-                console.log(`Syncing user with request ${requestId}`);
                 const syncResponse = await fetch(`${apiBaseUrl}/api/user/sync`, {
                     method: 'POST',
                     headers: {
@@ -498,11 +593,10 @@ export default function AnalyticsPage() {
                         'Content-Type': 'application/json',
                     },
                 });
-                
+
                 if (syncResponse.ok) {
                     const syncData = await syncResponse.json();
                     if (syncData.retry_needed) {
-                        console.log('User sync completed with database issues, data may be refreshing...');
                     }
                 } else {
                     console.warn('User sync had issues, continuing with analytics fetch...');
@@ -512,19 +606,15 @@ export default function AnalyticsPage() {
                 // Continue anyway - analytics might still work if user already exists
             }
 
-            console.log(`Fetching analytics with request ${requestId}`);
-            
             // Add retry logic for network failures
             let lastError = null;
             const maxRetries = 3;
-            
+
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    console.log(`Analytics fetch attempt ${attempt}/${maxRetries} for request ${requestId}`);
-                    
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-                    
+
                     const response = await fetch(`${apiBaseUrl}/api/analytics/enhanced?days=${timeRange}&requestId=${requestId}`, {
                         headers: {
                             'Authorization': `Bearer ${token}`,
@@ -537,12 +627,21 @@ export default function AnalyticsPage() {
 
                     if (response.ok) {
                         const data = await response.json();
-                        console.log(`Successfully received analytics data for request ${requestId}`);
-                        setAnalytics(data);
+
+                        // Handle both old and new response formats
+                        if (data.analytics && data.connection_status) {
+                            // New format with connection status
+                            setAnalytics(data.analytics);
+                            setConnectionStatus(data.connection_status);
+                        } else {
+                            // Legacy format - assume connected if we got data
+                            setAnalytics(data as EnhancedAnalytics);
+                            setConnectionStatus({ twitch_connected: true, settings_url: '/settings' });
+                        }
+
                         setLoading(false);
                         return; // Success - exit retry loop
                     } else if (response.status === 429) {
-                        console.log(`Request ${requestId} rejected - another request in progress`);
                         // Handle duplicate request gracefully - don't show error to user
                         // The concurrent request should complete and provide the data
                         return;
@@ -551,7 +650,7 @@ export default function AnalyticsPage() {
                         const error = new Error(`HTTP ${response.status}: ${errorText}`);
                         console.error(`Analytics request ${requestId} failed with status:`, response.status, errorText);
                         lastError = error;
-                        
+
                         // Don't retry client errors (4xx), only server errors (5xx) and network issues
                         if (response.status >= 400 && response.status < 500) {
                             throw error; // Don't retry client errors
@@ -560,27 +659,26 @@ export default function AnalyticsPage() {
                 } catch (fetchError) {
                     console.error(`Analytics fetch attempt ${attempt} failed for request ${requestId}:`, fetchError);
                     lastError = fetchError;
-                    
+
                     // If this is an AbortError (timeout), don't retry
                     if (fetchError instanceof Error && fetchError.name === 'AbortError') {
                         throw new Error('Request timed out after 30 seconds');
                     }
-                    
+
                     // Wait before retrying (exponential backoff)
                     if (attempt < maxRetries) {
                         const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Cap at 5 seconds
-                        console.log(`Waiting ${waitTime}ms before retry...`);
                         await new Promise(resolve => setTimeout(resolve, waitTime));
                     }
                 }
             }
-            
+
             // If we get here, all retries failed
             throw lastError || new Error('All retry attempts failed');
-            
+
         } catch (error) {
             console.error(`Analytics request ${requestId} failed with error:`, error);
-            
+
             // Provide user-friendly error messages
             let userMessage = 'Failed to load analytics data.';
             if (error instanceof Error) {
@@ -592,20 +690,19 @@ export default function AnalyticsPage() {
                     userMessage = 'Server error. Please try again in a few moments.';
                 }
             }
-            
+
             // Show error to user (you can implement a toast/notification system)
             console.error('User-friendly error:', userMessage);
-            
+
             setLoading(false);
         } finally {
             setIsRequestInProgress(false);
-            console.log(`Completed analytics request ${requestId}`);
         }
-    }, [isLoaded, isSignedIn, getToken, timeRange, isRequestInProgress, lastRequestId]);
+    }, [isLoaded, isSignedIn, getToken, timeRange, isRequestInProgress, lastRequestId, checkConnectionStatus]);
 
     const handleRefresh = async () => {
         if (refreshing || isRequestInProgress) return;
-        
+
         setRefreshing(true);
         await fetchAnalyticsData(true); // Force refresh
         setRefreshing(false);
@@ -617,7 +714,7 @@ export default function AnalyticsPage() {
         try {
             const token = await getToken();
             const apiBaseUrl = getApiBaseUrl();
-            
+
             const response = await fetch(`${apiBaseUrl}/api/analytics/collect`, {
                 method: 'POST',
                 headers: {
@@ -639,23 +736,20 @@ export default function AnalyticsPage() {
 
     const handleTimeRangeChange = (newTimeRange: string) => {
         if (newTimeRange === timeRange || isRequestInProgress) return;
-        
-        console.log(`Time range changing from ${timeRange} to ${newTimeRange}`);
+
         setTimeRange(newTimeRange);
     };
 
     // Initial load effect - only run once when user is loaded
     useEffect(() => {
-        if (isLoaded && isSignedIn && !analytics && !isRequestInProgress) {
-            console.log('Initial analytics load');
+        if (isLoaded && isSignedIn && !isRequestInProgress) {
             fetchAnalyticsData();
         }
-    }, [isLoaded, isSignedIn]); // Removed fetchAnalyticsData from dependencies
+    }, [isLoaded, isSignedIn]); // Only depend on auth state
 
     // Time range change effect - with debouncing
     useEffect(() => {
         if (isLoaded && isSignedIn && analytics) { // Only if we have initial data
-            console.log('Time range changed, fetching new data');
             const timeoutId = setTimeout(() => {
                 fetchAnalyticsData();
             }, 300); // 300ms debounce
@@ -676,6 +770,68 @@ export default function AnalyticsPage() {
         return (
             <div className="flex items-center justify-center min-h-screen">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+            </div>
+        );
+    }
+
+    // Show connection prompt if Twitch is not connected
+    // Also show if we have no analytics data and connectionStatus indicates disconnected
+    if ((connectionStatus && !connectionStatus.twitch_connected) ||
+        (connectionStatus === null && !analytics && !loading)) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
+                <div className="max-w-4xl mx-auto">
+                    <div className="flex items-center mb-2">
+                        <BarChart3 className="w-6 h-6 text-emerald-500 mr-2" />
+                        <span className="text-sm text-emerald-400 font-medium">Channel Analytics</span>
+                    </div>
+                    <h1 className="text-3xl font-bold text-white mb-6">Connect Your Twitch Account</h1>
+
+                    <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-8">
+                        <div className="text-center">
+                            <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <BarChart3 className="w-8 h-8 text-emerald-500" />
+                            </div>
+                            <h2 className="text-2xl font-bold text-white mb-4">Analytics Awaiting Connection</h2>
+                            <p className="text-gray-400 mb-8 max-w-2xl mx-auto">
+                                Connect your Twitch account to unlock powerful analytics, track your channel's performance, and get insights to grow your audience.
+                            </p>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-6">
+                                    <TrendingUp className="w-8 h-8 text-emerald-500 mx-auto mb-3" />
+                                    <h3 className="text-white font-semibold mb-2">Performance Tracking</h3>
+                                    <p className="text-gray-400 text-sm">Monitor views, followers, and subscriber growth over time.</p>
+                                </div>
+                                <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-6">
+                                    <Video className="w-8 h-8 text-purple-500 mx-auto mb-3" />
+                                    <h3 className="text-white font-semibold mb-2">Content Analysis</h3>
+                                    <p className="text-gray-400 text-sm">Understand which content performs best with your audience.</p>
+                                </div>
+                                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-6">
+                                    <Eye className="w-8 h-8 text-blue-500 mx-auto mb-3" />
+                                    <h3 className="text-white font-semibold mb-2">Audience Insights</h3>
+                                    <p className="text-gray-400 text-sm">Discover engagement patterns and optimize your streaming strategy.</p>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={() => setShowConnectionModal(true)}
+                                className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white px-8 py-3 rounded-lg font-semibold transition-all duration-200"
+                            >
+                                Connect Twitch Account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Connection Modal */}
+                <ConnectionModal
+                    isOpen={showConnectionModal}
+                    onClose={() => setShowConnectionModal(false)}
+                    platform="twitch"
+                    getToken={getToken}
+                />
             </div>
         );
     }
@@ -709,20 +865,31 @@ export default function AnalyticsPage() {
                         <p className="text-gray-400 mt-2">Track your content performance and understand what resonates with your audience.</p>
                     </div>
                     <div className="flex space-x-3">
-                        <button
-                            onClick={handleManualCollection}
-                            className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
-                        >
-                            Update Data
-                        </button>
-                        <button
-                            onClick={handleRefresh}
-                            disabled={refreshing}
-                            className="flex items-center px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
-                        >
-                            <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                            Refresh
-                        </button>
+                        {connectionStatus?.twitch_connected ? (
+                            <>
+                                <button
+                                    onClick={handleManualCollection}
+                                    className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                                >
+                                    Update Data
+                                </button>
+                                <button
+                                    onClick={handleRefresh}
+                                    disabled={refreshing}
+                                    className="flex items-center px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
+                                >
+                                    <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                                    Refresh
+                                </button>
+                            </>
+                        ) : (
+                            <button
+                                onClick={() => setShowConnectionModal(true)}
+                                className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                            >
+                                Connect Twitch Account
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -782,8 +949,8 @@ export default function AnalyticsPage() {
                                     <span className="text-white font-semibold">{formatNumber(safeOverview.averageViewsPerVideo)}</span>
                                 </div>
                                 <div className="w-full bg-gray-700 rounded-full h-2">
-                                    <div 
-                                        className="bg-emerald-500 h-2 rounded-full" 
+                                    <div
+                                        className="bg-emerald-500 h-2 rounded-full"
                                         style={{ width: `${Math.min((safeOverview.averageViewsPerVideo / Math.max(safeOverview.totalViews / Math.max(safeOverview.videoCount, 1), 1)) * 100, 100)}%` }}
                                     ></div>
                                 </div>
@@ -796,7 +963,7 @@ export default function AnalyticsPage() {
                             </div>
                             <div className="pt-2 border-t border-gray-700">
                                 <p className="text-sm text-gray-400">
-                                    {safeOverview.videoCount > 0 ? 
+                                    {safeOverview.videoCount > 0 ?
                                         `You have ${safeOverview.videoCount} pieces of content generating ${formatNumber(safeOverview.totalViews)} total views.` :
                                         "Start creating content to see your analytics here!"
                                     }
@@ -827,15 +994,15 @@ export default function AnalyticsPage() {
                             <div className="flex justify-between items-center">
                                 <span className="text-gray-300">Sub Rate</span>
                                 <span className="text-white font-semibold">
-                                    {safeOverview.currentFollowers > 0 ? 
-                                        `${((safeOverview.currentSubscribers / safeOverview.currentFollowers) * 100).toFixed(1)}%` : 
+                                    {safeOverview.currentFollowers > 0 ?
+                                        `${((safeOverview.currentSubscribers / safeOverview.currentFollowers) * 100).toFixed(1)}%` :
                                         '0%'
                                     }
                                 </span>
                             </div>
                             <div className="pt-2 border-t border-gray-700">
                                 <p className="text-sm text-gray-400">
-                                    {safeOverview.currentSubscribers > 0 ? 
+                                    {safeOverview.currentSubscribers > 0 ?
                                         `${safeOverview.currentSubscribers} of your ${formatNumber(safeOverview.currentFollowers)} followers are subscribers.` :
                                         "Encourage followers to subscribe for steady support!"
                                     }

@@ -83,42 +83,51 @@ func Initialize() error {
 
 func AuthMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		// Ensure Clerk secret key is set
-		secretKey := os.Getenv("CLERK_SECRET_KEY")
-		if secretKey == "" {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Server configuration error",
-			})
-		}
-
-		// Set the key for this request
-		clerk.SetKey(secretKey)
-
-		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Authorization header is required",
-			})
-		}
-
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid Authorization header format",
-			})
-		}
-
-		token := parts[1]
-
-		// Always try manual JWT parsing first in production to avoid Clerk SDK issues
-		// This is more reliable for production deployment
-		user, err := parseJWTManually(token)
+		token, err := getTokenFromRequest(c)
 		if err != nil {
-			return tryClerkVerification(c, token)
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": err.Error(),
+			})
 		}
-		c.Locals("user", *user)
-		return c.Next()
+
+		return authenticateWithToken(c, token)
 	}
+}
+
+func getTokenFromRequest(c *fiber.Ctx) (string, error) {
+	authHeader := c.Get("Authorization")
+	if authHeader == "" {
+		return "", errors.New("Authorization header is required")
+	}
+
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return "", errors.New("Invalid Authorization header format")
+	}
+
+	return parts[1], nil
+}
+
+func authenticateWithToken(c *fiber.Ctx, token string) error {
+	// Ensure Clerk secret key is set
+	secretKey := os.Getenv("CLERK_SECRET_KEY")
+	if secretKey == "" {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Server configuration error",
+		})
+	}
+
+	// Set the key for this request
+	clerk.SetKey(secretKey)
+
+	// Always try manual JWT parsing first in production to avoid Clerk SDK issues
+	// This is more reliable for production deployment
+	user, err := parseJWTManually(token)
+	if err != nil {
+		return tryClerkVerification(c, token)
+	}
+	c.Locals("user", *user)
+	return c.Next()
 }
 
 func GetUserFromContext(c *fiber.Ctx) (*User, error) {

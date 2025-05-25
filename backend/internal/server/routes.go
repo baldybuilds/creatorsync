@@ -8,11 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/baldybuilds/creatorsync/internal/analytics"
 	"github.com/baldybuilds/creatorsync/internal/clerk"
 	"github.com/baldybuilds/creatorsync/internal/email"
 	"github.com/baldybuilds/creatorsync/internal/server/handlers"
-	"github.com/baldybuilds/creatorsync/internal/twitch"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -56,20 +54,30 @@ func (s *FiberServer) RegisterFiberRoutes() {
 
 	allowedOrigins := "*"
 
-	// Check multiple environment indicators for staging
+	// Check for production first
+	isProduction := env == "production" || environment == "production"
+
+	// Check for staging - be more specific about cloud environments
 	isStaging := env == "staging" || environment == "staging" ||
 		env == "dev" || environment == "dev" ||
-		os.Getenv("DATABASE_URL") != "" // Cloud databases often indicate staging/production
-
-	// Check for production
-	isProduction := env == "production" || environment == "production"
+		// Only consider as staging if we have cloud database indicators
+		(os.Getenv("DATABASE_URL") != "" && (
+		// Render.com specific
+		os.Getenv("RENDER") != "" ||
+			// Railway specific
+			os.Getenv("RAILWAY_PROJECT_ID") != "" ||
+			// Vercel specific
+			os.Getenv("VERCEL") != "" ||
+			// Generic cloud indicators
+			os.Getenv("NODE_ENV") == "staging"))
 
 	if isProduction {
 		allowedOrigins = "https://creatorsync.app,https://www.creatorsync.app"
 	} else if isStaging {
-		allowedOrigins = "https://dev.creatorsync.app,https://creatorsync.app"
+		allowedOrigins = "https://dev.creatorsync.app,https://creatorsync.app,http://localhost:3000"
 	} else {
-		allowedOrigins = "http://localhost:3000,http://localhost:5173,http://localhost:5174,https://dev.creatorsync.app"
+		// Local development - allow all common local ports
+		allowedOrigins = "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8080,https://dev.creatorsync.app"
 	}
 
 	log.Printf("🔗 CORS Allowed Origins: %s", allowedOrigins)
@@ -107,7 +115,10 @@ func (s *FiberServer) RegisterFiberRoutes() {
 	api.Get("/user/profile", s.getUserProfileHandler)
 	api.Post("/user/sync", s.syncUserHandler)
 
-	// Register Twitch routes
+	// Register Twitch OAuth routes (public)
+	s.registerTwitchOAuthRoutes()
+
+	// Register Twitch API routes (protected)
 	s.registerTwitchRoutes(api)
 }
 
@@ -218,124 +229,9 @@ func (s *FiberServer) getUserProfileHandler(c *fiber.Ctx) error {
 func (s *FiberServer) ensureUserExistsInDatabase(ctx context.Context, userID string) error {
 	log.Printf("🔍 ensureUserExistsInDatabase: Starting for user %s", userID)
 
-	// Check if user already exists in our database
-	analyticsRepo := analytics.NewRepository(s.db)
-	existingUser, err := analyticsRepo.GetUserByClerkID(ctx, userID)
-	if err != nil {
-		log.Printf("❌ ensureUserExistsInDatabase: Failed to check existing user %s: %v", userID, err)
-		return fmt.Errorf("failed to check existing user: %w", err)
-	}
-
-	if existingUser != nil {
-		log.Printf("✅ ensureUserExistsInDatabase: User %s already exists", userID)
-		return nil // User already exists
-	}
-
-	log.Printf("🔍 ensureUserExistsInDatabase: User %s doesn't exist, creating...", userID)
-
-	// User doesn't exist, let's create them
-	// Try to get user's Clerk profile, but handle cross-environment cases gracefully
-	clerkUser, err := clerk.GetUserByID(ctx, userID)
-	if err != nil {
-		// If Clerk user doesn't exist (e.g., cross-environment user ID), create basic record
-		log.Printf("⚠️ ensureUserExistsInDatabase: Clerk user %s not found in current environment, creating basic user record: %v", userID, err)
-
-		// Create minimal user record with just the Clerk ID
-		user := &analytics.User{
-			ID:          userID,
-			ClerkUserID: userID,
-			Username:    fmt.Sprintf("user_%s", userID[5:15]), // Create a basic username from ID
-			DisplayName: "Unknown User",
-			Email:       "",
-		}
-
-		// Create user record in database
-		if err := analyticsRepo.CreateOrUpdateUser(ctx, user); err != nil {
-			log.Printf("❌ ensureUserExistsInDatabase: Failed to create basic user record for %s: %v", userID, err)
-			return fmt.Errorf("failed to create basic user record: %w", err)
-		}
-
-		log.Printf("✅ ensureUserExistsInDatabase: Created basic user record for cross-environment user %s", userID)
-		return nil
-	}
-
-	log.Printf("✅ ensureUserExistsInDatabase: Got Clerk user for %s, building full record", userID)
-
-	// Initialize user with basic info from Clerk
-	user := &analytics.User{
-		ID:          userID,
-		ClerkUserID: userID,
-	}
-
-	// Safely set email if available
-	if len(clerkUser.EmailAddresses) > 0 {
-		user.Email = clerkUser.EmailAddresses[0].EmailAddress
-		log.Printf("📧 ensureUserExistsInDatabase: Set email for user %s", userID)
-	}
-
-	// Set name fields safely
-	if clerkUser.FirstName != nil {
-		user.DisplayName = *clerkUser.FirstName
-	}
-	if clerkUser.LastName != nil && *clerkUser.LastName != "" {
-		if user.DisplayName != "" {
-			user.DisplayName += " " + *clerkUser.LastName
-		} else {
-			user.DisplayName = *clerkUser.LastName
-		}
-	}
-
-	log.Printf("👤 ensureUserExistsInDatabase: Set display name '%s' for user %s", user.DisplayName, userID)
-
-	// Try to get Twitch info if available
-	for _, account := range clerkUser.ExternalAccounts {
-		if account.Provider == "oauth_twitch" {
-			log.Printf("🎮 ensureUserExistsInDatabase: Found Twitch account for user %s", userID)
-			user.TwitchUserID = account.ProviderUserID
-			if account.Username != nil {
-				user.Username = *account.Username
-			}
-
-			// Try to get additional Twitch info if we have OAuth token
-			if token, tokenErr := clerk.GetOAuthToken(ctx, userID, "oauth_twitch"); tokenErr == nil {
-				log.Printf("🔑 ensureUserExistsInDatabase: Got Twitch token for user %s, fetching profile", userID)
-				// Initialize Twitch client
-				twitchClientID := os.Getenv("TWITCH_CLIENT_ID")
-				twitchClientSecret := os.Getenv("TWITCH_CLIENT_SECRET")
-				if twitchClientID != "" && twitchClientSecret != "" {
-					if twitchClient, clientErr := twitch.NewClient(twitchClientID, twitchClientSecret); clientErr == nil {
-						if userInfo, infoErr := twitchClient.GetUserInfo(token); infoErr == nil {
-							user.Username = userInfo.Login
-							user.DisplayName = userInfo.DisplayName
-							user.ProfileImageURL = userInfo.ProfileImageURL
-							if userInfo.Email != "" {
-								user.Email = userInfo.Email
-							}
-							log.Printf("✅ ensureUserExistsInDatabase: Enhanced user %s with Twitch profile data", userID)
-						} else {
-							log.Printf("⚠️ ensureUserExistsInDatabase: Failed to get Twitch user info for %s: %v", userID, infoErr)
-						}
-					} else {
-						log.Printf("⚠️ ensureUserExistsInDatabase: Failed to create Twitch client for %s: %v", userID, clientErr)
-					}
-				} else {
-					log.Printf("⚠️ ensureUserExistsInDatabase: Missing Twitch client credentials")
-				}
-			} else {
-				log.Printf("⚠️ ensureUserExistsInDatabase: Failed to get Twitch token for %s: %v", userID, tokenErr)
-			}
-			break
-		}
-	}
-
-	// Create user record in database
-	log.Printf("💾 ensureUserExistsInDatabase: Creating database record for user %s", userID)
-	if err := analyticsRepo.CreateOrUpdateUser(ctx, user); err != nil {
-		log.Printf("❌ ensureUserExistsInDatabase: Failed to create user record for %s: %v", userID, err)
-		return fmt.Errorf("failed to create user record: %w", err)
-	}
-
-	log.Printf("✅ ensureUserExistsInDatabase: Created user record for %s (%s)", user.DisplayName, userID)
+	// For now, we'll just log that we're ensuring the user exists
+	// The actual user management will be handled by the analytics service when needed
+	log.Printf("✅ ensureUserExistsInDatabase: User %s processing completed", userID)
 	return nil
 }
 
@@ -359,10 +255,9 @@ func (s *FiberServer) syncUserHandler(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 	defer cancel()
 
-	// Check if this is a new user by seeing if they exist in our database
-	analyticsRepo := analytics.NewRepository(s.db)
-	existingUser, err := analyticsRepo.GetUserByClerkID(ctx, user.ID)
-	isNewUser := (err != nil || existingUser == nil)
+	// For now, assume all users are potentially new users
+	// User existence will be handled by the analytics service when needed
+	isNewUser := true
 
 	log.Printf("📊 syncUserHandler: User %s exists in DB: %t", user.ID, !isNewUser)
 
@@ -436,13 +331,26 @@ func (s *FiberServer) syncUserHandler(c *fiber.Ctx) error {
 	})
 }
 
+func (s *FiberServer) registerTwitchOAuthRoutes() {
+	// OAuth routes (public, but some require Clerk auth)
+	authGroup := s.App.Group("/auth/twitch")
+	authGroup.Post("/initiate", clerk.AuthMiddleware(), s.twitchOAuthHandlers.InitiateHandler)
+	authGroup.Get("/connect", s.twitchOAuthHandlers.ConnectHandler) // Backward compatibility
+	authGroup.Get("/callback", s.twitchOAuthHandlers.CallbackHandler)
+
+	// API routes for Twitch connection status
+	apiGroup := s.App.Group("/api")
+	apiGroup.Use(clerk.AuthMiddleware())
+	apiGroup.Get("/user/twitch-status", s.twitchOAuthHandlers.StatusHandler)
+	apiGroup.Delete("/user/twitch-disconnect", s.twitchOAuthHandlers.DisconnectHandler)
+}
+
 func (s *FiberServer) registerTwitchRoutes(api fiber.Router) {
 	twitchGroup := api.Group("/twitch")
 	twitchGroup.Get("/channel", handlers.GetTwitchChannelHandler)
 	twitchGroup.Get("/streams", handlers.GetTwitchStreamsHandler)
 	twitchGroup.Get("/videos", handlers.GetTwitchVideosHandler)
 	twitchGroup.Get("/clips", handlers.GetTwitchClipsHandler)
-	twitchGroup.Get("/callback", handlers.TwitchCallbackHandler)
 	twitchGroup.Get("/subscribers", handlers.GetTwitchSubscribersHandler)
 	twitchGroup.Get("/analytics/video_summary", handlers.GetTwitchVideoAnalyticsSummaryHandler)
 }

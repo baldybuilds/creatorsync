@@ -1,146 +1,451 @@
 'use client';
 
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Button } from '@/components/ui/button';
-import { Users, BarChart2, Video, Calendar, Sparkles, ArrowRight } from 'lucide-react';
+import { useAuth } from '@clerk/nextjs';
+import { 
+    Users, 
+    Video, 
+    Sparkles, 
+    ArrowRight, 
+    TrendingUp,
+    Eye,
+    Heart,
+    RefreshCw,
+    Play,
+    Clock,
+    Target
+} from 'lucide-react';
+
+// Types for real data
+interface DashboardOverview {
+    totalViews: number;
+    videoCount: number;
+    averageViewsPerVideo: number;
+    totalWatchTimeHours: number;
+    currentFollowers: number;
+    currentSubscribers: number;
+    followerChange: number;
+    subscriberChange: number;
+}
+
+interface RecentVideo {
+    id: number;
+    title: string;
+    view_count: number;
+    published_at: string;
+    video_type: string;
+}
+
+interface OverviewData {
+    overview: DashboardOverview;
+    recentVideos: RecentVideo[];
+    connectionStatus: {
+        twitch_connected: boolean;
+    };
+}
+
+// Utility functions
+const formatNumber = (num: number | undefined | null): string => {
+    if (num === undefined || num === null || isNaN(num)) return '0';
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+    return Math.round(num).toString();
+};
+
+const formatDuration = (hours: number | undefined | null): string => {
+    if (hours === undefined || hours === null || isNaN(hours)) return '0 min';
+    if (hours >= 1) return `${Math.round(hours)} hrs`;
+    return `${Math.round(hours * 60)} min`;
+};
+
+const getTimeAgo = (dateString: string): string => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) return 'Just now';
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays < 7) return `${diffInDays}d ago`;
+    return date.toLocaleDateString();
+};
+
+// Enhanced Metric Card Component
+const EnhancedMetricCard = ({
+    title,
+    value,
+    subtitle,
+    change,
+    icon: Icon,
+    gradient = "from-emerald-500/10 to-teal-500/5",
+    iconColor = "text-emerald-400"
+}: {
+    title: string;
+    value: string | number;
+    subtitle: string;
+    change?: { value: number; period: string };
+    icon: React.ComponentType<{ className?: string }>;
+    gradient?: string;
+    iconColor?: string;
+}) => (
+    <motion.div
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6 relative overflow-hidden group hover:border-emerald-500/30 transition-all duration-300"
+    >
+        <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500`}></div>
+        <div className="relative z-10">
+            <div className={`flex items-center ${iconColor} mb-4`}>
+                <Icon className="w-5 h-5 mr-2" />
+                <h3 className="text-sm font-medium text-gray-400">{title}</h3>
+            </div>
+            <p className="text-3xl font-bold text-white mb-2">
+                {typeof value === 'number' ? formatNumber(value) : value}
+            </p>
+            <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-500">{subtitle}</p>
+                {change && (
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                        change.value >= 0 
+                            ? 'bg-emerald-500/20 text-emerald-300' 
+                            : 'bg-red-500/20 text-red-300'
+                    }`}>
+                        {change.value >= 0 ? '+' : ''}{change.value}% {change.period}
+                    </span>
+                )}
+            </div>
+        </div>
+    </motion.div>
+);
 
 export function OverviewSection() {
+    const { isLoaded, isSignedIn, getToken } = useAuth();
+    const [data, setData] = useState<OverviewData | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+
+    // Helper function to get API base URL
+    const getApiBaseUrl = () => {
+        const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+        const nodeEnv = process.env.NODE_ENV;
+        const appEnv = process.env.NEXT_PUBLIC_APP_ENV;
+
+        if (hostname === 'dev.creatorsync.app') {
+            return 'https://api-dev.creatorsync.app';
+        } else if (appEnv === 'staging') {
+            return 'https://api-dev.creatorsync.app';
+        } else if (nodeEnv === 'production') {
+            return 'https://api.creatorsync.app';
+        } else {
+            return 'http://localhost:8080';
+        }
+    };
+
+    // Fetch overview data
+    const fetchOverviewData = useCallback(async () => {
+        if (!isLoaded || !isSignedIn) return;
+
+        try {
+            const token = await getToken();
+            const apiBaseUrl = getApiBaseUrl();
+
+            const response = await fetch(`${apiBaseUrl}/api/analytics/enhanced?days=7`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                console.log('Overview API Response:', data);
+                
+                // Handle both old and new response formats (same as Analytics page)
+                let analyticsData;
+                let connectionStatus;
+                
+                if (data.analytics && data.connection_status) {
+                    // New format with connection status
+                    analyticsData = data.analytics;
+                    connectionStatus = data.connection_status;
+                } else {
+                    // Legacy format - assume connected if we got data
+                    analyticsData = data;
+                    connectionStatus = { twitch_connected: true, settings_url: '/settings' };
+                }
+                
+                // Transform the analytics data for overview
+                const overviewData: OverviewData = {
+                    overview: analyticsData.overview || {
+                        totalViews: 0,
+                        videoCount: 0,
+                        averageViewsPerVideo: 0,
+                        totalWatchTimeHours: 0,
+                        currentFollowers: 0,
+                        currentSubscribers: 0,
+                        followerChange: 0,
+                        subscriberChange: 0,
+                    },
+                    recentVideos: (analyticsData.recentVideos || []).slice(0, 3),
+                    connectionStatus: connectionStatus
+                };
+
+                setData(overviewData);
+            } else {
+                console.error('Failed to fetch overview data:', response.status);
+            }
+        } catch (error) {
+            console.error('Error fetching overview data:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, [isLoaded, isSignedIn, getToken]);
+
+    const handleRefresh = async () => {
+        if (refreshing) return;
+        setRefreshing(true);
+        await fetchOverviewData();
+        setRefreshing(false);
+    };
+
+    // Initial load
+    useEffect(() => {
+        if (isLoaded && isSignedIn) {
+            fetchOverviewData();
+        }
+    }, [isLoaded, isSignedIn, fetchOverviewData]);
+
+    // Loading state
+    if (!isLoaded || !isSignedIn || loading) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+            </div>
+        );
+    }
+
+    const safeOverview = data?.overview || {
+        totalViews: 0,
+        videoCount: 0,
+        averageViewsPerVideo: 0,
+        totalWatchTimeHours: 0,
+        currentFollowers: 0,
+        currentSubscribers: 0,
+        followerChange: 0,
+        subscriberChange: 0,
+    };
+
+    // Calculate engagement metrics
+    const engagementRate = safeOverview.videoCount > 0 ? safeOverview.totalViews / safeOverview.videoCount : 0;
+    const viewsPerFollower = safeOverview.currentFollowers > 0 ? safeOverview.totalViews / safeOverview.currentFollowers : 0;
+
     return (
-        <div className="p-8">
-            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-brand-500/20 border border-brand-500/30 text-brand-500 text-sm mb-6 w-fit">
-                <Sparkles className="w-4 h-4" />
-                <span>Dashboard Overview</span>
-            </div>
-
-            <h2 className="text-4xl font-bold mb-6">
-                <span className="text-light-surface-900 dark:text-dark-surface-100">Welcome back,</span>{' '}
-                <span className="text-gradient">Creator</span>
-            </h2>
-
-            <p className="text-xl text-light-surface-700 dark:text-dark-surface-300 max-w-3xl mb-10">
-                Here's an overview of your content performance and recent activity.
-            </p>
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                <motion.div
-                    initial={{ y: 20, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.4, delay: 0.1 }}
-                    className="bg-light-surface-100/90 dark:bg-dark-surface-900/90 backdrop-blur-sm p-6 rounded-xl shadow-md border border-light-surface-200/50 dark:border-dark-surface-800/50 relative overflow-hidden group hover:border-brand-500/30 transition-all duration-300"
-                >
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-500/10 to-indigo-500/5 rounded-full -mr-10 -mt-10 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                    <div className="flex items-center text-brand-500 mb-3">
-                        <Users className="w-7 h-7 mr-3" />
-                        <h3 className="text-sm font-medium">Followers</h3>
+        <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
+            <div className="max-w-7xl mx-auto">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-8">
+                    <div>
+                        <div className="flex items-center mb-2">
+                            <Sparkles className="w-6 h-6 text-emerald-500 mr-2" />
+                            <span className="text-sm text-emerald-400 font-medium">Dashboard Overview</span>
+                        </div>
+                        <h1 className="text-4xl font-bold mb-2">
+                            <span className="text-white">Welcome back, </span>
+                            <span className="bg-gradient-to-r from-emerald-400 to-blue-400 bg-clip-text text-transparent">Creator</span>
+                        </h1>
+                        <p className="text-gray-400 text-lg">Track your channel's performance and recent activity at a glance.</p>
                     </div>
-                    <p className="text-3xl font-bold text-light-surface-900 dark:text-dark-surface-100">1,234</p>
-                    <p className="text-sm text-light-surface-600 dark:text-dark-surface-400 mt-1 flex items-center">
-                        <span className="text-emerald-500 mr-1">↑</span> +23 since last week
-                    </p>
-                </motion.div>
-
-                <motion.div
-                    initial={{ y: 20, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.4, delay: 0.2 }}
-                    className="bg-light-surface-100/90 dark:bg-dark-surface-900/90 backdrop-blur-sm p-6 rounded-xl shadow-md border border-light-surface-200/50 dark:border-dark-surface-800/50 relative overflow-hidden group hover:border-brand-500/30 transition-all duration-300"
-                >
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-500/10 to-pink-500/5 rounded-full -mr-10 -mt-10 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                    <div className="flex items-center text-brand-500 mb-3">
-                        <Users className="w-7 h-7 mr-3" />
-                        <h3 className="text-sm font-medium">Subscribers</h3>
-                    </div>
-                    <p className="text-3xl font-bold text-light-surface-900 dark:text-dark-surface-100">567</p>
-                    <p className="text-sm text-light-surface-600 dark:text-dark-surface-400 mt-1 flex items-center">
-                        <span className="text-emerald-500 mr-1">↑</span> +5 since last month
-                    </p>
-                </motion.div>
-
-                <motion.div
-                    initial={{ y: 20, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.4, delay: 0.3 }}
-                    className="bg-light-surface-100/90 dark:bg-dark-surface-900/90 backdrop-blur-sm p-6 rounded-xl shadow-md border border-light-surface-200/50 dark:border-dark-surface-800/50 relative overflow-hidden group hover:border-brand-500/30 transition-all duration-300"
-                >
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-amber-500/10 to-orange-500/5 rounded-full -mr-10 -mt-10 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                    <div className="flex items-center text-brand-500 mb-3">
-                        <BarChart2 className="w-7 h-7 mr-3" />
-                        <h3 className="text-sm font-medium">Avg. Views</h3>
-                    </div>
-                    <p className="text-3xl font-bold text-light-surface-900 dark:text-dark-surface-100">8,765</p>
-                    <p className="text-sm text-light-surface-600 dark:text-dark-surface-400 mt-1 flex items-center">
-                        <span className="text-rose-500 mr-1">↓</span> -2% vs previous 7 streams
-                    </p>
-                </motion.div>
-            </div>
-
-            {/* Recent Activity */}
-            <motion.div
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.4, delay: 0.4 }}
-                className="bg-light-surface-100/90 dark:bg-dark-surface-900/90 backdrop-blur-sm p-6 rounded-xl shadow-md border border-light-surface-200/50 dark:border-dark-surface-800/50 mb-10"
-            >
-                <h3 className="text-xl font-bold text-light-surface-900 dark:text-dark-surface-100 mb-4">Recent Activity</h3>
-                <ul className="space-y-4">
-                    <li className="flex items-center gap-3 p-3 hover:bg-light-surface-200/30 dark:hover:bg-dark-surface-800/30 rounded-lg transition-colors">
-                        <div className="w-10 h-10 rounded-full bg-brand-500/20 flex items-center justify-center text-brand-500">
-                            <Video className="w-5 h-5" />
-                        </div>
-                        <div>
-                            <p className="text-light-surface-900 dark:text-dark-surface-100 font-medium">New Clip: "Epic Win!"</p>
-                            <p className="text-sm text-light-surface-600 dark:text-dark-surface-400">5 mins ago</p>
-                        </div>
-                        <Button variant="ghost" size="sm" className="ml-auto">
-                            <ArrowRight className="w-4 h-4" />
-                        </Button>
-                    </li>
-                    <li className="flex items-center gap-3 p-3 hover:bg-light-surface-200/30 dark:hover:bg-dark-surface-800/30 rounded-lg transition-colors">
-                        <div className="w-10 h-10 rounded-full bg-brand-500/20 flex items-center justify-center text-brand-500">
-                            <Calendar className="w-5 h-5" />
-                        </div>
-                        <div>
-                            <p className="text-light-surface-900 dark:text-dark-surface-100 font-medium">Scheduled Post: "Stream starting soon!"</p>
-                            <p className="text-sm text-light-surface-600 dark:text-dark-surface-400">1 hour ago</p>
-                        </div>
-                        <Button variant="ghost" size="sm" className="ml-auto">
-                            <ArrowRight className="w-4 h-4" />
-                        </Button>
-                    </li>
-                    <li className="flex items-center gap-3 p-3 hover:bg-light-surface-200/30 dark:hover:bg-dark-surface-800/30 rounded-lg transition-colors">
-                        <div className="w-10 h-10 rounded-full bg-brand-500/20 flex items-center justify-center text-brand-500">
-                            <Users className="w-5 h-5" />
-                        </div>
-                        <div>
-                            <p className="text-light-surface-900 dark:text-dark-surface-100 font-medium">New Follower: "CoolDude123"</p>
-                            <p className="text-sm text-light-surface-600 dark:text-dark-surface-400">3 hours ago</p>
-                        </div>
-                        <Button variant="ghost" size="sm" className="ml-auto">
-                            <ArrowRight className="w-4 h-4" />
-                        </Button>
-                    </li>
-                </ul>
-            </motion.div>
-
-            {/* Creator Tip */}
-            <motion.div
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.4, delay: 0.5 }}
-                className="bg-brand-500/10 border border-brand-500/20 p-6 rounded-xl"
-            >
-                <div className="flex items-center gap-2 text-brand-500 mb-3">
-                    <Sparkles className="w-5 h-5" />
-                    <h3 className="font-semibold">Creator Tip</h3>
+                    <button
+                        onClick={handleRefresh}
+                        disabled={refreshing}
+                        className="flex items-center px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
+                    >
+                        <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </button>
                 </div>
-                <p className="text-light-surface-700 dark:text-dark-surface-300 mb-4">
-                    Did you know you can auto-schedule your clips to be posted across multiple platforms? Try our new scheduling feature to maximize your reach.
-                </p>
-                <Button variant="default" size="sm">
-                    Try Scheduling <ArrowRight className="w-4 h-4 ml-1" />
-                </Button>
-            </motion.div>
+
+                {/* Key Metrics Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <EnhancedMetricCard
+                        title="Followers"
+                        value={safeOverview.currentFollowers}
+                        subtitle="Growing your community"
+                        change={{ value: safeOverview.followerChange, period: "this week" }}
+                        icon={Heart}
+                        gradient="from-rose-500/10 to-pink-500/5"
+                        iconColor="text-rose-400"
+                    />
+                    <EnhancedMetricCard
+                        title="Subscribers"
+                        value={safeOverview.currentSubscribers}
+                        subtitle="Supporting your channel"
+                        change={{ value: safeOverview.subscriberChange, period: "this month" }}
+                        icon={Users}
+                        gradient="from-violet-500/10 to-purple-500/5"
+                        iconColor="text-violet-400"
+                    />
+                    <EnhancedMetricCard
+                        title="Total Views"
+                        value={safeOverview.totalViews}
+                        subtitle={`${formatNumber(engagementRate)} avg per video`}
+                        icon={Eye}
+                        gradient="from-emerald-500/10 to-teal-500/5"
+                        iconColor="text-emerald-400"
+                    />
+                    <EnhancedMetricCard
+                        title="Content"
+                        value={safeOverview.videoCount}
+                        subtitle={`${formatDuration(safeOverview.totalWatchTimeHours)} watch time`}
+                        icon={Video}
+                        gradient="from-blue-500/10 to-cyan-500/5"
+                        iconColor="text-blue-400"
+                    />
+                </div>
+
+                {/* Main Content Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Recent Content Performance */}
+                    <div className="lg:col-span-2">
+                        <motion.div
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
+                        >
+                            <div className="flex items-center justify-between mb-6">
+                                <div>
+                                    <h3 className="text-xl font-bold text-white flex items-center">
+                                        <TrendingUp className="w-5 h-5 mr-2 text-emerald-400" />
+                                        Recent Content Performance
+                                    </h3>
+                                    <p className="text-gray-400 text-sm mt-1">Your latest videos and their performance</p>
+                                </div>
+                                <span className="text-xs text-gray-500 bg-gray-800/50 px-2 py-1 rounded-full">
+                                    Last 7 days
+                                </span>
+                            </div>
+
+                            {data?.recentVideos && data.recentVideos.length > 0 ? (
+                                <div className="space-y-4">
+                                    {data.recentVideos.map((video, index) => (
+                                        <motion.div
+                                            key={`recent-video-${video.id}-${index}`}
+                                            initial={{ x: -20, opacity: 0 }}
+                                            animate={{ x: 0, opacity: 1 }}
+                                            transition={{ delay: index * 0.1 }}
+                                            className="flex items-center gap-4 p-4 bg-gray-800/30 rounded-xl hover:bg-gray-800/50 transition-all duration-300 group"
+                                        >
+                                            <div className="w-12 h-12 bg-gradient-to-br from-emerald-500/20 to-blue-500/20 rounded-lg flex items-center justify-center">
+                                                <Play className="w-6 h-6 text-emerald-400" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <h4 className="text-white font-medium group-hover:text-emerald-300 transition-colors line-clamp-1">
+                                                    {video.title}
+                                                </h4>
+                                                <div className="flex items-center gap-4 mt-1 text-sm text-gray-400">
+                                                    <span className="flex items-center">
+                                                        <Eye className="w-4 h-4 mr-1" />
+                                                        {formatNumber(video.view_count)} views
+                                                    </span>
+                                                    <span className="flex items-center">
+                                                        <Clock className="w-4 h-4 mr-1" />
+                                                        {getTimeAgo(video.published_at)}
+                                                    </span>
+                                                    <span className={`px-2 py-1 rounded-full text-xs ${
+                                                        video.video_type?.toLowerCase().includes('clip') 
+                                                            ? 'bg-emerald-500/20 text-emerald-300' 
+                                                            : 'bg-blue-500/20 text-blue-300'
+                                                    }`}>
+                                                        {video.video_type?.toLowerCase().includes('clip') ? 'Clip' : 'Broadcast'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="text-lg font-bold text-white">
+                                                    {formatNumber(video.view_count)}
+                                                </div>
+                                                <div className="text-xs text-gray-500">views</div>
+                                            </div>
+                                        </motion.div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-8">
+                                    <Video className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                                    <p className="text-gray-400">No recent content found</p>
+                                    <p className="text-gray-500 text-sm">Start creating to see your performance here!</p>
+                                </div>
+                            )}
+                        </motion.div>
+                    </div>
+
+                    {/* Quick Insights & Tips */}
+                    <div className="space-y-6">
+                        {/* Performance Insights */}
+                        <motion.div
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ delay: 0.3 }}
+                            className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
+                        >
+                            <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                                <Target className="w-5 h-5 mr-2 text-emerald-400" />
+                                Quick Insights
+                            </h3>
+                            <div className="space-y-4">
+                                {safeOverview.currentFollowers > 0 && (
+                                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                                        <p className="text-sm text-emerald-300">
+                                            <strong>Great!</strong> You have {formatNumber(safeOverview.currentFollowers)} followers.
+                                        </p>
+                                    </div>
+                                )}
+                                {safeOverview.videoCount > 5 && (
+                                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                                        <p className="text-sm text-blue-300">
+                                            <strong>Active Creator:</strong> {safeOverview.videoCount} pieces of content created!
+                                        </p>
+                                    </div>
+                                )}
+                                {viewsPerFollower > 0 && (
+                                    <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+                                        <p className="text-sm text-purple-300">
+                                            <strong>Engagement:</strong> {formatNumber(viewsPerFollower)} views per follower.
+                                        </p>
+                                    </div>
+                                )}
+                                {safeOverview.videoCount === 0 && (
+                                    <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                                        <p className="text-sm text-yellow-300">
+                                            <strong>Get Started:</strong> Create your first content to see insights here!
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+
+                        {/* Creator Tip */}
+                        <motion.div
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ delay: 0.4 }}
+                            className="bg-gradient-to-br from-emerald-500/10 via-blue-500/5 to-purple-500/10 border border-emerald-500/20 rounded-2xl p-6"
+                        >
+                            <div className="flex items-center gap-2 text-emerald-400 mb-3">
+                                <Sparkles className="w-5 h-5" />
+                                <h3 className="font-semibold">Creator Tip</h3>
+                            </div>
+                            <p className="text-gray-300 mb-4">
+                                Auto-schedule your clips across multiple platforms to maximize reach and engagement. Consistency is key to growing your audience!
+                            </p>
+                            <button className="flex items-center text-emerald-400 hover:text-emerald-300 transition-colors font-medium">
+                                Try Scheduling <ArrowRight className="w-4 h-4 ml-1" />
+                            </button>
+                        </motion.div>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 } 

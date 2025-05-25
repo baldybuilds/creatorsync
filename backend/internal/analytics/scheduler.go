@@ -16,14 +16,14 @@ type Scheduler interface {
 }
 
 type scheduler struct {
-	collector   DataCollector
+	collector   Collector
 	db          database.Service
 	ticker      *time.Ticker
 	stopChannel chan bool
 	running     bool
 }
 
-func NewScheduler(collector DataCollector, db database.Service) Scheduler {
+func NewScheduler(collector Collector, db database.Service) Scheduler {
 	return &scheduler{
 		collector:   collector,
 		db:          db,
@@ -83,7 +83,7 @@ func (s *scheduler) ScheduleDailyCollection() {
 func (s *scheduler) TriggerUserCollection(userID string) {
 	ctx := context.Background()
 	go func() {
-		if err := s.collector.CollectAllUserData(ctx, userID); err != nil {
+		if err := s.collector.CollectUserData(ctx, userID); err != nil {
 			log.Printf("Failed to collect data for user %s: %v", userID, err)
 		}
 	}()
@@ -133,7 +133,7 @@ func (s *scheduler) processBatch(ctx context.Context, users []string) {
 			// Add some jitter to avoid hitting rate limits
 			time.Sleep(time.Duration(len(uid)%10) * time.Second)
 
-			if err := s.collector.CollectDailyChannelData(ctx, uid); err != nil {
+			if err := s.collector.CollectChannelData(ctx, uid); err != nil {
 				log.Printf("Failed daily collection for user %s: %v", uid, err)
 			} else {
 				log.Printf("Completed daily collection for user %s", uid)
@@ -171,10 +171,10 @@ func (s *scheduler) getAllUsers(ctx context.Context) ([]string, error) {
 // BackgroundCollectionManager manages all background collection tasks
 type BackgroundCollectionManager struct {
 	scheduler Scheduler
-	collector DataCollector
+	collector Collector
 }
 
-func NewBackgroundCollectionManager(collector DataCollector, db database.Service) *BackgroundCollectionManager {
+func NewBackgroundCollectionManager(collector Collector, db database.Service) *BackgroundCollectionManager {
 	scheduler := NewScheduler(collector, db)
 	return &BackgroundCollectionManager{
 		scheduler: scheduler,

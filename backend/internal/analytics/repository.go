@@ -8,891 +8,351 @@ import (
 	"time"
 
 	"github.com/baldybuilds/creatorsync/internal/database"
-	"github.com/jmoiron/sqlx"
+	"github.com/baldybuilds/creatorsync/internal/twitch"
 )
 
 type Repository interface {
-	// User Management
-	CreateOrUpdateUser(ctx context.Context, user *User) error
-	GetUserByClerkID(ctx context.Context, clerkUserID string) (*User, error)
-
-	// Channel Analytics
-	SaveChannelAnalytics(ctx context.Context, analytics *ChannelAnalytics) error
-	GetChannelAnalytics(ctx context.Context, userID string, days int) ([]ChannelAnalytics, error)
-	GetLatestChannelAnalytics(ctx context.Context, userID string) (*ChannelAnalytics, error)
-
-	// Stream Sessions
-	SaveStreamSession(ctx context.Context, session *StreamSession) error
-	GetStreamSessions(ctx context.Context, userID string, limit int) ([]StreamSession, error)
-	GetStreamSessionsByDateRange(ctx context.Context, userID string, start, end time.Time) ([]StreamSession, error)
-
-	// Video Analytics
-	SaveVideoAnalytics(ctx context.Context, video *VideoAnalytics) error
-	GetVideoAnalytics(ctx context.Context, userID string, limit int) ([]VideoAnalytics, error)
-	UpdateVideoAnalytics(ctx context.Context, videoID string, views, likes, comments int) error
-
-	// Game Analytics
-	SaveGameAnalytics(ctx context.Context, game *GameAnalytics) error
-	GetTopGames(ctx context.Context, userID string, limit int) ([]GameAnalytics, error)
-
-	// Dashboard Data
 	GetDashboardOverview(ctx context.Context, userID string) (*DashboardOverview, error)
 	GetAnalyticsChartData(ctx context.Context, userID string, days int) (*AnalyticsChartData, error)
 	GetDetailedAnalytics(ctx context.Context, userID string) (*DetailedAnalytics, error)
 	GetEnhancedAnalytics(ctx context.Context, userID string, days int) (*EnhancedAnalytics, error)
 
-	// Jobs
-	CreateAnalyticsJob(ctx context.Context, job *AnalyticsJob) error
-	UpdateAnalyticsJob(ctx context.Context, jobID int, status string, errorMsg *string) error
-	GetAnalyticsJobs(ctx context.Context, userID string, limit int) ([]AnalyticsJob, error)
-
-	// System Stats
-	GetSystemStats(ctx context.Context) (*SystemStats, error)
-
-	// Data freshness check
-	CheckUserAnalyticsData(ctx context.Context, userID string) (hasData bool, lastUpdate *time.Time, err error)
+	SaveVideos(ctx context.Context, conn *database.RequestConnection, userID string, videos []twitch.VideoInfo) (int, error)
+	GetVideos(ctx context.Context, conn *database.RequestConnection, userID string, limit int) ([]VideoAnalytics, error)
+	GetVideosInDateRange(ctx context.Context, conn *database.RequestConnection, userID string, days int, limit int) ([]VideoAnalytics, error)
+	GetVideoCount(ctx context.Context, conn *database.RequestConnection, userID string) (int, error)
 }
 
 type repository struct {
-	dbService database.Service
+	db database.Service
 }
 
-func NewRepository(dbService database.Service) Repository {
-	return &repository{
-		dbService: dbService,
-	}
+func NewRepository(db database.Service) Repository {
+	return &repository{db: db}
 }
-
-// Helper method to get a fresh database connection
-func (r *repository) getDB() *sqlx.DB {
-	// Test connection health before returning
-	db := r.dbService.GetDB()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	if err := db.PingContext(ctx); err != nil {
-		log.Printf("⚠️ Database connection unhealthy: %v", err)
-		// Try to reconnect
-		if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
-			log.Printf("❌ Failed to reconnect to database: %v", reconnectErr)
-		}
-	}
-
-	return sqlx.NewDb(db, "postgres")
-}
-
-// User Management Methods
-
-func (r *repository) CreateOrUpdateUser(ctx context.Context, user *User) error {
-	query := `
-		INSERT INTO users (id, clerk_user_id, twitch_user_id, username, display_name, email, profile_image_url)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (clerk_user_id) 
-		DO UPDATE SET 
-			twitch_user_id = EXCLUDED.twitch_user_id,
-			username = EXCLUDED.username,
-			display_name = EXCLUDED.display_name,
-			email = EXCLUDED.email,
-			profile_image_url = EXCLUDED.profile_image_url,
-			updated_at = NOW()
-		RETURNING id, created_at, updated_at
-	`
-	err := r.getDB().QueryRowContext(ctx, query,
-		user.ID, user.ClerkUserID, user.TwitchUserID, user.Username,
-		user.DisplayName, user.Email, user.ProfileImageURL).Scan(
-		&user.ID, &user.CreatedAt, &user.UpdatedAt)
-	return err
-}
-
-func (r *repository) GetUserByClerkID(ctx context.Context, clerkUserID string) (*User, error) {
-	query := `
-		SELECT id, clerk_user_id, twitch_user_id, username, display_name, email, profile_image_url, created_at, updated_at
-		FROM users 
-		WHERE clerk_user_id = $1
-	`
-
-	var user User
-	err := r.getDB().GetContext(ctx, &user, query, clerkUserID)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return &user, err
-}
-
-// Channel Analytics Methods
-
-func (r *repository) SaveChannelAnalytics(ctx context.Context, analytics *ChannelAnalytics) error {
-	query := `
-		INSERT INTO channel_analytics (user_id, date, followers_count, following_count, total_views, subscriber_count)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (user_id, date) 
-		DO UPDATE SET 
-			followers_count = EXCLUDED.followers_count,
-			following_count = EXCLUDED.following_count,
-			total_views = EXCLUDED.total_views,
-			subscriber_count = EXCLUDED.subscriber_count
-	`
-	_, err := r.getDB().ExecContext(ctx, query,
-		analytics.UserID, analytics.Date, analytics.FollowersCount,
-		analytics.FollowingCount, analytics.TotalViews, analytics.SubscriberCount)
-	return err
-}
-
-func (r *repository) GetChannelAnalytics(ctx context.Context, userID string, days int) ([]ChannelAnalytics, error) {
-	query := `
-		SELECT id, user_id, date, followers_count, following_count, total_views, subscriber_count, created_at
-		FROM channel_analytics 
-		WHERE user_id = $1 AND date >= CURRENT_DATE - INTERVAL '%d days'
-		ORDER BY date DESC
-	`
-
-	var analytics []ChannelAnalytics
-	err := r.getDB().SelectContext(ctx, &analytics, fmt.Sprintf(query, days), userID)
-	return analytics, err
-}
-
-func (r *repository) GetLatestChannelAnalytics(ctx context.Context, userID string) (*ChannelAnalytics, error) {
-	query := `
-		SELECT id, user_id, date, followers_count, following_count, total_views, subscriber_count, created_at
-		FROM channel_analytics 
-		WHERE user_id = $1 
-		ORDER BY date DESC 
-		LIMIT 1
-	`
-
-	var analytics ChannelAnalytics
-	err := r.getDB().GetContext(ctx, &analytics, query, userID)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return &analytics, err
-}
-
-// Stream Sessions Methods
-
-func (r *repository) SaveStreamSession(ctx context.Context, session *StreamSession) error {
-	query := `
-		INSERT INTO stream_sessions (
-			user_id, stream_id, title, game_name, game_id, started_at, ended_at,
-			duration_minutes, peak_viewers, average_viewers, total_chatters,
-			followers_gained, subscribers_gained
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		ON CONFLICT (stream_id) 
-		DO UPDATE SET 
-			ended_at = EXCLUDED.ended_at,
-			duration_minutes = EXCLUDED.duration_minutes,
-			peak_viewers = EXCLUDED.peak_viewers,
-			average_viewers = EXCLUDED.average_viewers,
-			total_chatters = EXCLUDED.total_chatters,
-			followers_gained = EXCLUDED.followers_gained,
-			subscribers_gained = EXCLUDED.subscribers_gained
-	`
-	_, err := r.getDB().ExecContext(ctx, query,
-		session.UserID, session.StreamID, session.Title, session.GameName, session.GameID,
-		session.StartedAt, session.EndedAt, session.DurationMinutes, session.PeakViewers,
-		session.AverageViewers, session.TotalChatters, session.FollowersGained, session.SubscribersGained)
-	return err
-}
-
-func (r *repository) GetStreamSessions(ctx context.Context, userID string, limit int) ([]StreamSession, error) {
-	query := `
-		SELECT id, user_id, stream_id, title, game_name, game_id, started_at, ended_at,
-			   duration_minutes, peak_viewers, average_viewers, total_chatters,
-			   followers_gained, subscribers_gained, created_at
-		FROM stream_sessions 
-		WHERE user_id = $1 
-		ORDER BY started_at DESC 
-		LIMIT $2
-	`
-
-	var sessions []StreamSession
-	err := r.getDB().SelectContext(ctx, &sessions, query, userID, limit)
-	return sessions, err
-}
-
-func (r *repository) GetStreamSessionsByDateRange(ctx context.Context, userID string, start, end time.Time) ([]StreamSession, error) {
-	query := `
-		SELECT id, user_id, stream_id, title, game_name, game_id, started_at, ended_at,
-			   duration_minutes, peak_viewers, average_viewers, total_chatters,
-			   followers_gained, subscribers_gained, created_at
-		FROM stream_sessions 
-		WHERE user_id = $1 AND started_at >= $2 AND started_at <= $3
-		ORDER BY started_at DESC
-	`
-
-	var sessions []StreamSession
-	err := r.getDB().SelectContext(ctx, &sessions, query, userID, start, end)
-	return sessions, err
-}
-
-// Video Analytics Methods
-
-func (r *repository) SaveVideoAnalytics(ctx context.Context, video *VideoAnalytics) error {
-	query := `
-		INSERT INTO video_analytics (
-			user_id, video_id, title, video_type, duration_seconds, view_count,
-			like_count, comment_count, thumbnail_url, published_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (video_id) 
-		DO UPDATE SET 
-			title = EXCLUDED.title,
-			view_count = EXCLUDED.view_count,
-			like_count = EXCLUDED.like_count,
-			comment_count = EXCLUDED.comment_count,
-			updated_at = NOW()
-	`
-	_, err := r.getDB().ExecContext(ctx, query,
-		video.UserID, video.VideoID, video.Title, video.VideoType, video.Duration,
-		video.ViewCount, video.LikeCount, video.CommentCount, video.ThumbnailURL, video.PublishedAt)
-	return err
-}
-
-func (r *repository) GetVideoAnalytics(ctx context.Context, userID string, limit int) ([]VideoAnalytics, error) {
-	query := `
-		SELECT id, user_id, video_id, title, video_type, duration_seconds, view_count,
-			   like_count, comment_count, thumbnail_url, published_at, created_at, updated_at
-		FROM video_analytics 
-		WHERE user_id = $1 
-		ORDER BY COALESCE(published_at, created_at) DESC 
-		LIMIT $2
-	`
-
-	log.Printf("🔍 GetVideoAnalytics: Querying for user %s with limit %d", userID, limit)
-
-	var videos []VideoAnalytics
-	var err error
-
-	// Try the query with retry logic for connection issues
-	for attempt := 1; attempt <= 2; attempt++ {
-		db := r.getDB()
-
-		// Test connection health
-		if pingErr := db.PingContext(ctx); pingErr != nil {
-			log.Printf("⚠️ GetVideoAnalytics: Database unhealthy on attempt %d for user %s: %v", attempt, userID, pingErr)
-			if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
-				log.Printf("❌ GetVideoAnalytics: Reconnect failed on attempt %d: %v", attempt, reconnectErr)
-				continue
-			}
-			db = r.getDB()
-		}
-
-		// Execute query with comprehensive error handling
-		log.Printf("🔍 GetVideoAnalytics: Executing query for user %s (attempt %d)", userID, attempt)
-
-		err = func() error {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("❌ GetVideoAnalytics: PANIC during query execution for user %s: %v", userID, r)
-					err = fmt.Errorf("panic during query execution: %v", r)
-				}
-			}()
-
-			return db.SelectContext(ctx, &videos, query, userID, limit)
-		}()
-
-		if err != nil {
-			log.Printf("❌ GetVideoAnalytics: Query failed on attempt %d for user %s: %v", attempt, userID, err)
-			if attempt < 2 {
-				time.Sleep(time.Duration(attempt) * time.Second)
-				continue
-			}
-		} else {
-			break
-		}
-	}
-
-	if err != nil {
-		log.Printf("❌ GetVideoAnalytics: All attempts failed for user %s: %v", userID, err)
-		return videos, err
-	}
-
-	log.Printf("📊 GetVideoAnalytics: Found %d videos for user %s", len(videos), userID)
-
-	// Safely process and log video results
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("❌ GetVideoAnalytics: PANIC during result processing for user %s: %v", userID, r)
-		}
-	}()
-
-	// Log video details with error handling
-	for i, video := range videos {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("❌ GetVideoAnalytics: PANIC logging video %d for user %s: %v", i, userID, r)
-				}
-			}()
-
-			if i < 3 { // Only log first 3 videos to avoid spam
-				log.Printf("📹 Video %d: ID=%s, Title=%s, Views=%d, Published=%v",
-					i+1, video.VideoID, video.Title, video.ViewCount, video.PublishedAt)
-			}
-		}()
-	}
-
-	log.Printf("✅ GetVideoAnalytics: Successfully processed %d videos for user %s", len(videos), userID)
-	return videos, nil
-}
-
-func (r *repository) UpdateVideoAnalytics(ctx context.Context, videoID string, views, likes, comments int) error {
-	query := `
-		UPDATE video_analytics 
-		SET view_count = $2, like_count = $3, comment_count = $4, updated_at = NOW()
-		WHERE video_id = $1
-	`
-	_, err := r.getDB().ExecContext(ctx, query, videoID, views, likes, comments)
-	return err
-}
-
-// Game Analytics Methods
-
-func (r *repository) SaveGameAnalytics(ctx context.Context, game *GameAnalytics) error {
-	query := `
-		INSERT INTO game_analytics (
-			user_id, game_id, game_name, total_streams, total_hours_streamed,
-			average_viewers, peak_viewers, total_followers_gained, last_streamed_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (user_id, game_id) 
-		DO UPDATE SET 
-			game_name = EXCLUDED.game_name,
-			total_streams = EXCLUDED.total_streams,
-			total_hours_streamed = EXCLUDED.total_hours_streamed,
-			average_viewers = EXCLUDED.average_viewers,
-			peak_viewers = EXCLUDED.peak_viewers,
-			total_followers_gained = EXCLUDED.total_followers_gained,
-			last_streamed_at = EXCLUDED.last_streamed_at,
-			updated_at = NOW()
-	`
-	_, err := r.getDB().ExecContext(ctx, query,
-		game.UserID, game.GameID, game.GameName, game.TotalStreams, game.TotalHoursStreamed,
-		game.AverageViewers, game.PeakViewers, game.TotalFollowersGained, game.LastStreamedAt)
-	return err
-}
-
-func (r *repository) GetTopGames(ctx context.Context, userID string, limit int) ([]GameAnalytics, error) {
-	query := `
-		SELECT id, user_id, game_id, game_name, total_streams, total_hours_streamed,
-			   average_viewers, peak_viewers, total_followers_gained, last_streamed_at,
-			   created_at, updated_at
-		FROM game_analytics 
-		WHERE user_id = $1 
-		ORDER BY total_hours_streamed DESC 
-		LIMIT $2
-	`
-
-	var games []GameAnalytics
-	err := r.getDB().SelectContext(ctx, &games, query, userID, limit)
-	return games, err
-}
-
-// Dashboard Methods
 
 func (r *repository) GetDashboardOverview(ctx context.Context, userID string) (*DashboardOverview, error) {
+	overview := &DashboardOverview{}
+
+	db := r.db.GetDB()
+
 	query := `
-SELECT 
-COALESCE(current_analytics.followers_count, 0) as current_followers,
-COALESCE(current_analytics.followers_count - previous_analytics.followers_count, 0) as follower_change,
-COALESCE(current_analytics.subscriber_count, 0) as current_subscribers,
-COALESCE(current_analytics.subscriber_count - previous_analytics.subscriber_count, 0) as subscriber_change,
-COALESCE(current_analytics.total_views, 0) as total_views,
-COALESCE(current_analytics.total_views - previous_analytics.total_views, 0) as view_change,
-COALESCE(stream_stats.average_viewers, 0) as average_viewers,
-COALESCE(stream_stats.streams_count, 0) as streams_last_30_days,
-COALESCE(stream_stats.total_hours, 0) as hours_streamed_last_30
-FROM (
-SELECT followers_count, subscriber_count, total_views
-FROM channel_analytics 
-WHERE user_id = $1 
-ORDER BY date DESC 
-LIMIT 1
-) current_analytics
-LEFT JOIN (
-SELECT followers_count, subscriber_count, total_views
-FROM channel_analytics 
-WHERE user_id = $1 
-ORDER BY date DESC 
-LIMIT 1 OFFSET 7
-) previous_analytics ON true
-LEFT JOIN (
-SELECT 
-AVG(average_viewers) as average_viewers,
-COUNT(*) as streams_count,
-SUM(duration_minutes) / 60.0 as total_hours
-FROM stream_sessions 
-WHERE user_id = $1 
-AND started_at >= CURRENT_DATE - INTERVAL '30 days'
-) stream_stats ON true
-`
+		SELECT 
+			COALESCE(MAX(followers_count), 0) as current_followers,
+			COALESCE(MAX(subscriber_count), 0) as current_subscribers,
+			COALESCE(MAX(total_views), 0) as total_views
+		FROM channel_analytics 
+		WHERE user_id = $1 
+		AND date >= CURRENT_DATE - INTERVAL '30 days'
+	`
 
-	var overview DashboardOverview
-	row := r.getDB().QueryRowContext(ctx, query, userID)
-
-	var avgViewers sql.NullFloat64
-	err := row.Scan(
-		&overview.CurrentFollowers, &overview.FollowerChange,
-		&overview.CurrentSubscribers, &overview.SubscriberChange,
-		&overview.TotalViews, &overview.ViewChange,
-		&avgViewers, &overview.StreamsLast30Days, &overview.HoursStreamedLast30,
+	err := db.QueryRowContext(ctx, query, userID).Scan(
+		&overview.CurrentFollowers,
+		&overview.CurrentSubscribers,
+		&overview.TotalViews,
 	)
 
-	if err != nil {
-		return nil, err
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get dashboard overview: %w", err)
 	}
 
-	overview.AverageViewers = int(avgViewers.Float64)
-
-	// Calculate percentage changes
-	if overview.CurrentFollowers > 0 {
-		overview.FollowerChangePercent = float64(overview.FollowerChange) / float64(overview.CurrentFollowers-overview.FollowerChange) * 100
-	}
-
-	return &overview, nil
+	return overview, nil
 }
 
 func (r *repository) GetAnalyticsChartData(ctx context.Context, userID string, days int) (*AnalyticsChartData, error) {
-	chartData := &AnalyticsChartData{}
+	chartData := &AnalyticsChartData{
+		FollowerGrowth:   []ChartDataPoint{},
+		ViewershipTrends: []ChartDataPoint{},
+		StreamFrequency:  []ChartDataPoint{},
+		TopGames:         []ChartDataPoint{},
+		VideoPerformance: []ChartDataPoint{},
+	}
 
-	// Follower growth chart
-	followerQuery := `
+	db := r.db.GetDB()
+
+	query := `
 		SELECT date, followers_count 
 		FROM channel_analytics 
-		WHERE user_id = $1 AND date >= CURRENT_DATE - INTERVAL '%d days'
+		WHERE user_id = $1 
+		AND date >= CURRENT_DATE - INTERVAL '%d days'
 		ORDER BY date ASC
 	`
 
-	rows, err := r.getDB().QueryContext(ctx, fmt.Sprintf(followerQuery, days), userID)
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(query, days), userID)
 	if err != nil {
-		return nil, err
+		return chartData, nil
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var date time.Time
 		var count int
+
 		if err := rows.Scan(&date, &count); err != nil {
 			continue
 		}
+
 		chartData.FollowerGrowth = append(chartData.FollowerGrowth, ChartDataPoint{
 			Date:  date.Format("2006-01-02"),
 			Value: float64(count),
 		})
 	}
 
-	// Add more chart data queries here...
-
 	return chartData, nil
 }
 
 func (r *repository) GetDetailedAnalytics(ctx context.Context, userID string) (*DetailedAnalytics, error) {
-	analytics := &DetailedAnalytics{}
-
-	// Get overview
 	overview, err := r.GetDashboardOverview(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	analytics.Overview = *overview
 
-	// Get chart data
 	chartData, err := r.GetAnalyticsChartData(ctx, userID, 30)
 	if err != nil {
 		return nil, err
 	}
-	analytics.Charts = *chartData
 
-	// Get top streams
-	topStreams, err := r.GetStreamSessions(ctx, userID, 5)
-	if err != nil {
-		return nil, err
-	}
-	analytics.TopStreams = topStreams
-
-	// Get top videos
-	topVideos, err := r.GetVideoAnalytics(ctx, userID, 5)
-	if err != nil {
-		return nil, err
-	}
-	analytics.TopVideos = topVideos
-
-	// Get top games
-	topGames, err := r.GetTopGames(ctx, userID, 5)
-	if err != nil {
-		return nil, err
-	}
-	analytics.TopGames = topGames
-
-	return analytics, nil
+	return &DetailedAnalytics{
+		Overview:       *overview,
+		Charts:         *chartData,
+		TopStreams:     []StreamSession{},
+		TopVideos:      []VideoAnalytics{},
+		TopGames:       []GameAnalytics{},
+		RecentActivity: []ActivityItem{},
+	}, nil
 }
 
-// GetEnhancedAnalytics provides video-based analytics for the new dashboard design
 func (r *repository) GetEnhancedAnalytics(ctx context.Context, userID string, days int) (*EnhancedAnalytics, error) {
-	analytics := &EnhancedAnalytics{}
+	db := r.db.GetDB()
 
-	// Get a single database connection for the entire operation to prevent disconnects
-	db := r.getDB()
+	var videoCount int
+	var totalViews int
+	var totalDuration int
 
-	// Test connection before starting
-	if err := db.PingContext(ctx); err != nil {
-		log.Printf("❌ Database connection test failed, attempting reconnect: %v", err)
-		if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
-			return nil, fmt.Errorf("failed to reconnect to database: %w", reconnectErr)
-		}
-		db = r.getDB()
-	}
-
-	log.Printf("🔍 Starting GetEnhancedAnalytics for user %s", userID)
-
-	// Calculate video-based overview metrics
-	overview, err := r.getVideoBasedOverview(ctx, userID, days)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get video-based overview: %w", err)
-	}
-	analytics.Overview = *overview
-
-	// Get performance data over time
-	performance, err := r.getPerformanceData(ctx, userID, days)
-	if err != nil {
-		log.Printf("⚠️ Failed to get performance data for user %s, using empty data: %v", userID, err)
-		// Continue with empty performance data rather than failing
-		analytics.Performance = PerformanceData{
-			ViewsOverTime:       []ChartDataPoint{},
-			ContentDistribution: []ContentTypeData{},
-		}
-	} else {
-		analytics.Performance = *performance
-	}
-
-	// Get top videos by view count with circuit breaker
-	log.Printf("🔍 GetEnhancedAnalytics: Starting top videos retrieval for user %s", userID)
-	topVideos, topErr := func() ([]VideoAnalytics, error) {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("❌ GetEnhancedAnalytics: PANIC during top videos retrieval for user %s: %v", userID, r)
-			}
-		}()
-
-		// Test connection again before top videos query
-		if err := db.PingContext(ctx); err != nil {
-			log.Printf("⚠️ Database connection unhealthy before top videos query, reconnecting: %v", err)
-			if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
-				log.Printf("❌ Failed to reconnect for top videos: %v", reconnectErr)
-				return []VideoAnalytics{}, fmt.Errorf("database reconnection failed: %w", reconnectErr)
-			}
-		}
-
-		return r.GetVideoAnalytics(ctx, userID, 5)
-	}()
-
-	if topErr != nil {
-		log.Printf("⚠️ Failed to get top videos for user %s, using empty data: %v", userID, topErr)
-		analytics.TopVideos = []VideoAnalytics{}
-	} else {
-		analytics.TopVideos = topVideos
-		log.Printf("✅ Retrieved %d top videos for user %s", len(topVideos), userID)
-	}
-
-	// Get recent videos with circuit breaker
-	log.Printf("🔍 GetEnhancedAnalytics: Starting recent videos retrieval for user %s", userID)
-	recentVideos, recentErr := func() ([]VideoAnalytics, error) {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("❌ GetEnhancedAnalytics: PANIC during recent videos retrieval for user %s: %v", userID, r)
-			}
-		}()
-
-		// Test connection again before recent videos query
-		if err := db.PingContext(ctx); err != nil {
-			log.Printf("⚠️ Database connection unhealthy before recent videos query, reconnecting: %v", err)
-			if reconnectErr := r.dbService.Reconnect(); reconnectErr != nil {
-				log.Printf("❌ Failed to reconnect for recent videos: %v", reconnectErr)
-				return []VideoAnalytics{}, fmt.Errorf("database reconnection failed: %w", reconnectErr)
-			}
-		}
-
-		return r.GetVideoAnalytics(ctx, userID, 10)
-	}()
-
-	if recentErr != nil {
-		log.Printf("⚠️ Failed to get recent videos for user %s, using empty data: %v", userID, recentErr)
-		analytics.RecentVideos = []VideoAnalytics{}
-	} else {
-		analytics.RecentVideos = recentVideos
-		log.Printf("✅ Retrieved %d recent videos for user %s", len(recentVideos), userID)
-	}
-
-	log.Printf("🎉 GetEnhancedAnalytics completed successfully for user %s: %d top videos, %d recent videos",
-		userID, len(analytics.TopVideos), len(analytics.RecentVideos))
-
-	return analytics, nil
-}
-
-// Helper method to calculate video-based overview metrics
-func (r *repository) getVideoBasedOverview(ctx context.Context, userID string, days int) (*VideoBasedOverview, error) {
-	log.Printf("🔍 Starting getVideoBasedOverview for user %s", userID)
-
-	// Get video metrics - show ALL videos for the user, not filtered by publish date
-	// because we want to show total channel metrics, not just recent videos
-	videoQuery := `
+	query := `
 		SELECT 
-			COALESCE(SUM(view_count), 0) as total_views,
 			COUNT(*) as video_count,
-			COALESCE(AVG(view_count), 0) as avg_views,
-			COALESCE(SUM(duration_seconds), 0) / 3600.0 as total_hours
+			COALESCE(SUM(view_count), 0) as total_views,
+			COALESCE(SUM(duration_seconds), 0) as total_duration
 		FROM video_analytics 
 		WHERE user_id = $1
+		AND published_at >= CURRENT_DATE - INTERVAL '%d days'
 	`
 
-	var totalViews, videoCount int
-	var avgViews, totalHours float64
+	err := db.QueryRowContext(ctx, fmt.Sprintf(query, days), userID).Scan(
+		&videoCount, &totalViews, &totalDuration,
+	)
 
-	db := r.getDB()
-	err := db.QueryRowContext(ctx, videoQuery, userID).Scan(
-		&totalViews, &videoCount, &avgViews, &totalHours)
-	if err != nil {
-		log.Printf("❌ Error executing video query for user %s: %v", userID, err)
-		log.Printf("❌ Query was: %s", videoQuery)
-		log.Printf("❌ User ID parameter: %s", userID)
-		return nil, fmt.Errorf("video query failed: %w", err)
-	}
-
-	log.Printf("📊 Enhanced analytics query for user %s: found %d videos, %d total views, %.2f avg views, %.2f total hours", userID, videoCount, totalViews, avgViews, totalHours)
-
-	// Get channel metrics (followers, subscribers) from latest channel analytics
-	channelQuery := `
-		SELECT 
-			COALESCE(followers_count, 0) as current_followers,
-			COALESCE(subscriber_count, 0) as current_subscribers
-		FROM channel_analytics 
-		WHERE user_id = $1 
-		ORDER BY date DESC 
-		LIMIT 1
-	`
-
-	var currentFollowers, currentSubscribers int
-	err = db.QueryRowContext(ctx, channelQuery, userID).Scan(
-		&currentFollowers, &currentSubscribers)
 	if err != nil && err != sql.ErrNoRows {
-		log.Printf("❌ Error executing channel query for user %s: %v", userID, err)
-		log.Printf("❌ Query was: %s", channelQuery)
-		return nil, fmt.Errorf("channel query failed: %w", err)
+		return nil, fmt.Errorf("failed to get enhanced analytics: %w", err)
 	}
 
-	if err == sql.ErrNoRows {
-		log.Printf("⚠️ No channel analytics found for user %s, using default values", userID)
-		currentFollowers = 0
-		currentSubscribers = 0
+	avgViews := float64(0)
+	if videoCount > 0 {
+		avgViews = float64(totalViews) / float64(videoCount)
 	}
 
-	log.Printf("📊 Channel metrics for user %s: %d followers, %d subscribers", userID, currentFollowers, currentSubscribers)
-
-	// Calculate follower/subscriber changes (simplified for now)
-	followerChange := 0   // TODO: Calculate from previous period
-	subscriberChange := 0 // TODO: Calculate from previous period
-
-	result := &VideoBasedOverview{
-		TotalViews:           totalViews,
-		VideoCount:           videoCount,
-		AverageViewsPerVideo: avgViews,
-		TotalWatchTimeHours:  totalHours,
-		CurrentFollowers:     currentFollowers,
-		CurrentSubscribers:   currentSubscribers,
-		FollowerChange:       followerChange,
-		SubscriberChange:     subscriberChange,
+	analytics := &EnhancedAnalytics{
+		Overview: VideoBasedOverview{
+			TotalViews:           totalViews,
+			VideoCount:           videoCount,
+			AverageViewsPerVideo: avgViews,
+			TotalWatchTimeHours:  float64(totalDuration) / 3600.0,
+		},
+		Performance: PerformanceData{
+			ViewsOverTime:       []ChartDataPoint{},
+			ContentDistribution: []ContentTypeData{},
+		},
+		TopVideos:    []VideoAnalytics{},
+		RecentVideos: []VideoAnalytics{},
 	}
 
-	log.Printf("✅ getVideoBasedOverview completed successfully for user %s", userID)
-	return result, nil
+	videos, err := r.getVideosForAnalytics(ctx, userID, 20)
+	if err == nil {
+		if len(videos) > 10 {
+			analytics.TopVideos = videos[:10]
+			analytics.RecentVideos = videos[:10]
+		} else {
+			analytics.TopVideos = videos
+			analytics.RecentVideos = videos
+		}
+	}
+
+	return analytics, nil
 }
 
-// Helper method to get performance data over time
-func (r *repository) getPerformanceData(ctx context.Context, userID string, days int) (*PerformanceData, error) {
-	performance := &PerformanceData{}
+func (r *repository) SaveVideos(ctx context.Context, conn *database.RequestConnection, userID string, videos []twitch.VideoInfo) (int, error) {
+	if len(videos) == 0 {
+		return 0, nil
+	}
 
-	// Views over time (aggregate by day)
-	viewsQuery := `
-		SELECT 
-			DATE(published_at) as date,
-			SUM(view_count) as daily_views
+	query := `
+		INSERT INTO video_analytics (
+			user_id, video_id, title, video_type, duration_seconds, view_count,
+			thumbnail_url, published_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (video_id) 
+		DO UPDATE SET 
+			title = EXCLUDED.title,
+			view_count = EXCLUDED.view_count,
+			updated_at = CURRENT_TIMESTAMP
+	`
+
+	savedCount := 0
+	var lastError error
+
+	for _, video := range videos {
+		_, err := conn.Exec(ctx, query,
+			userID, video.ID, video.Title, video.Type,
+			0, video.ViewCount, video.ThumbnailURL, &video.PublishedAt,
+		)
+
+		if err != nil {
+			log.Printf("⚠️ Failed to save video %s: %v (continuing with others)", video.ID, err)
+			lastError = err
+			continue // Continue processing other videos instead of failing completely
+		}
+		savedCount++
+	}
+
+	if savedCount > 0 {
+		log.Printf("✅ Saved %d/%d videos for user %s", savedCount, len(videos), userID)
+	}
+
+	// Only return error if no videos were saved at all
+	if savedCount == 0 && lastError != nil {
+		return 0, fmt.Errorf("failed to save any videos, last error: %w", lastError)
+	}
+
+	return savedCount, nil
+}
+
+func (r *repository) GetVideos(ctx context.Context, conn *database.RequestConnection, userID string, limit int) ([]VideoAnalytics, error) {
+	query := `
+		SELECT video_id, title, video_type, duration_seconds, view_count, 
+		       thumbnail_url, published_at, created_at, updated_at
 		FROM video_analytics 
 		WHERE user_id = $1 
-		AND published_at >= CURRENT_DATE - INTERVAL '%d days'
-		GROUP BY DATE(published_at)
-		ORDER BY date ASC
-	`
-
-	rows, err := r.getDB().QueryContext(ctx, fmt.Sprintf(viewsQuery, days), userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var date time.Time
-		var views int
-		if err := rows.Scan(&date, &views); err != nil {
-			continue
-		}
-		performance.ViewsOverTime = append(performance.ViewsOverTime, ChartDataPoint{
-			Date:  date.Format("2006-01-02"),
-			Value: float64(views),
-		})
-	}
-
-	// Content distribution by type and date
-	contentQuery := `
-		SELECT 
-			DATE(published_at) as date,
-			video_type,
-			COUNT(*) as count
-		FROM video_analytics 
-		WHERE user_id = $1 
-		AND published_at >= CURRENT_DATE - INTERVAL '%d days'
-		GROUP BY DATE(published_at), video_type
-		ORDER BY date ASC
-	`
-
-	rows, err = r.getDB().QueryContext(ctx, fmt.Sprintf(contentQuery, days), userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	// Group by date
-	contentMap := make(map[string]*ContentTypeData)
-	for rows.Next() {
-		var date time.Time
-		var videoType string
-		var count int
-		if err := rows.Scan(&date, &videoType, &count); err != nil {
-			continue
-		}
-
-		dateStr := date.Format("2006-01-02")
-		if contentMap[dateStr] == nil {
-			contentMap[dateStr] = &ContentTypeData{
-				Date: dateStr,
-			}
-		}
-
-		switch videoType {
-		case "archive", "vod":
-			contentMap[dateStr].Broadcasts += count
-		case "clip":
-			contentMap[dateStr].Clips += count
-		case "upload":
-			contentMap[dateStr].Uploads += count
-		}
-	}
-
-	// Convert map to slice
-	for _, data := range contentMap {
-		performance.ContentDistribution = append(performance.ContentDistribution, *data)
-	}
-
-	return performance, nil
-}
-
-// Analytics Jobs Methods
-
-func (r *repository) CreateAnalyticsJob(ctx context.Context, job *AnalyticsJob) error {
-	query := `
-		INSERT INTO analytics_jobs (user_id, job_type, status, data_date)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`
-	return r.getDB().GetContext(ctx, &job.ID, query, job.UserID, job.JobType, job.Status, job.DataDate)
-}
-
-func (r *repository) UpdateAnalyticsJob(ctx context.Context, jobID int, status string, errorMsg *string) error {
-	query := `
-		UPDATE analytics_jobs 
-		SET status = $2, completed_at = NOW(), error_message = $3
-		WHERE id = $1
-	`
-	_, err := r.getDB().ExecContext(ctx, query, jobID, status, errorMsg)
-	return err
-}
-
-func (r *repository) GetAnalyticsJobs(ctx context.Context, userID string, limit int) ([]AnalyticsJob, error) {
-	query := `
-		SELECT id, user_id, job_type, status, started_at, completed_at, 
-			   error_message, data_date, created_at
-		FROM analytics_jobs 
-		WHERE user_id = $1 
-		ORDER BY created_at DESC 
+		ORDER BY published_at DESC 
 		LIMIT $2
 	`
 
-	var jobs []AnalyticsJob
-	err := r.getDB().SelectContext(ctx, &jobs, query, userID, limit)
-	return jobs, err
-}
-
-func (r *repository) GetSystemStats(ctx context.Context) (*SystemStats, error) {
-	query := `
-		SELECT 
-			COUNT(DISTINCT user_id) as total_users,
-			COUNT(DISTINCT CASE WHEN created_at >= CURRENT_DATE - INTERVAL '7 days' THEN user_id END) as active_users,
-			COUNT(*) as total_jobs,
-			COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_jobs,
-			COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_jobs,
-			COALESCE(MAX(created_at), NOW()) as last_collection_run
-		FROM analytics_jobs
-		WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
-	`
-
-	var stats SystemStats
-	row := r.getDB().QueryRowContext(ctx, query)
-
-	err := row.Scan(
-		&stats.TotalUsers, &stats.ActiveUsers, &stats.TotalJobs,
-		&stats.SuccessfulJobs, &stats.FailedJobs, &stats.LastCollectionRun,
-	)
-
+	rows, err := conn.Query(ctx, query, userID, limit)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	if stats.TotalJobs > 0 {
-		stats.SuccessRate = float64(stats.SuccessfulJobs) / float64(stats.TotalJobs) * 100
+	var videos []VideoAnalytics
+	for rows.Next() {
+		var video VideoAnalytics
+		var publishedAt, createdAt, updatedAt time.Time
+
+		err := rows.Scan(
+			&video.VideoID, &video.Title, &video.VideoType,
+			&video.Duration, &video.ViewCount, &video.ThumbnailURL,
+			&publishedAt, &createdAt, &updatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		video.UserID = userID
+		video.PublishedAt = &publishedAt
+		video.CreatedAt = createdAt
+		video.UpdatedAt = updatedAt
+		videos = append(videos, video)
 	}
 
-	stats.AverageCollectionTime = "~30s"
-
-	return &stats, nil
+	return videos, nil
 }
 
-// CheckUserAnalyticsData checks if a user has analytics data and when it was last updated
-func (r *repository) CheckUserAnalyticsData(ctx context.Context, userID string) (bool, *time.Time, error) {
+func (r *repository) GetVideosInDateRange(ctx context.Context, conn *database.RequestConnection, userID string, days int, limit int) ([]VideoAnalytics, error) {
 	query := `
-		SELECT 
-			CASE 
-				WHEN COUNT(*) > 0 THEN true 
-				ELSE false 
-			END as has_data,
-			MAX(created_at) as last_update
-		FROM (
-			SELECT created_at FROM channel_analytics WHERE user_id = $1
-			UNION ALL
-			SELECT created_at FROM video_analytics WHERE user_id = $1
-			UNION ALL
-			SELECT created_at FROM stream_sessions WHERE user_id = $1
-		) all_data
+		SELECT video_id, title, video_type, duration_seconds, view_count, 
+		       thumbnail_url, published_at, created_at, updated_at
+		FROM video_analytics 
+		WHERE user_id = $1 
+		AND published_at >= CURRENT_DATE - INTERVAL '%d days'
+		ORDER BY published_at DESC 
+		LIMIT $2
 	`
 
-	var hasData bool
-	var lastUpdate sql.NullTime
-
-	err := r.getDB().QueryRowContext(ctx, query, userID).Scan(&hasData, &lastUpdate)
+	rows, err := conn.Query(ctx, fmt.Sprintf(query, days), userID, limit)
 	if err != nil {
-		return false, nil, err
+		return nil, err
+	}
+	defer rows.Close()
+
+	var videos []VideoAnalytics
+	for rows.Next() {
+		var video VideoAnalytics
+		var publishedAt, createdAt, updatedAt time.Time
+
+		err := rows.Scan(
+			&video.VideoID, &video.Title, &video.VideoType,
+			&video.Duration, &video.ViewCount, &video.ThumbnailURL,
+			&publishedAt, &createdAt, &updatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		video.UserID = userID
+		video.PublishedAt = &publishedAt
+		video.CreatedAt = createdAt
+		video.UpdatedAt = updatedAt
+		videos = append(videos, video)
 	}
 
-	var lastUpdatePtr *time.Time
-	if lastUpdate.Valid {
-		lastUpdatePtr = &lastUpdate.Time
+	return videos, nil
+}
+
+func (r *repository) GetVideoCount(ctx context.Context, conn *database.RequestConnection, userID string) (int, error) {
+	var count int
+	row := conn.QueryRow(ctx, "SELECT COUNT(*) FROM video_analytics WHERE user_id = $1", userID)
+	err := row.Scan(&count)
+	return count, err
+}
+
+func (r *repository) getVideosForAnalytics(ctx context.Context, userID string, limit int) ([]VideoAnalytics, error) {
+	db := r.db.GetDB()
+
+	query := `
+		SELECT video_id, title, video_type, duration_seconds, view_count, 
+		       thumbnail_url, published_at, created_at, updated_at
+		FROM video_analytics 
+		WHERE user_id = $1 
+		ORDER BY view_count DESC, published_at DESC
+		LIMIT $2
+	`
+
+	rows, err := db.QueryContext(ctx, query, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var videos []VideoAnalytics
+	for rows.Next() {
+		var video VideoAnalytics
+		var publishedAt, createdAt, updatedAt time.Time
+
+		err := rows.Scan(
+			&video.VideoID, &video.Title, &video.VideoType,
+			&video.Duration, &video.ViewCount, &video.ThumbnailURL,
+			&publishedAt, &createdAt, &updatedAt,
+		)
+		if err != nil {
+			continue
+		}
+
+		video.UserID = userID
+		video.PublishedAt = &publishedAt
+		video.CreatedAt = createdAt
+		video.UpdatedAt = updatedAt
+		videos = append(videos, video)
 	}
 
-	return hasData, lastUpdatePtr, nil
+	return videos, nil
 }

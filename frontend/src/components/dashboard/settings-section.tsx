@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Settings, Bell, Shield, Palette, User, ExternalLink } from 'lucide-react';
+import { TwitchConnectionManager } from '@/components/twitch/connection-manager';
 
 export function SettingsSection() {
     return (
@@ -112,18 +113,8 @@ export function SettingsSection() {
                     <p className="text-light-surface-700 dark:text-dark-surface-300 mb-6">
                         Manage your connected social media accounts and streaming platforms.
                     </p>
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between p-3 bg-white/50 dark:bg-black/20 rounded-lg">
-                            <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded bg-purple-500 flex items-center justify-center">
-                                    <span className="text-white text-xs font-bold">T</span>
-                                </div>
-                                <span className="font-medium text-light-surface-900 dark:text-dark-surface-100">Twitch</span>
-                            </div>
-                            <Button variant="outline" size="sm">
-                                Connected
-                            </Button>
-                        </div>
+                    <div className="space-y-4">
+                        <TwitchConnectionManager />
                         <div className="flex items-center justify-between p-3 bg-white/30 dark:bg-black/10 rounded-lg opacity-60">
                             <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 rounded bg-red-500 flex items-center justify-center">
@@ -132,7 +123,7 @@ export function SettingsSection() {
                                 <span className="font-medium text-light-surface-900 dark:text-dark-surface-100">YouTube</span>
                             </div>
                             <Button variant="ghost" size="sm">
-                                Connect
+                                Coming Soon
                             </Button>
                         </div>
                     </div>

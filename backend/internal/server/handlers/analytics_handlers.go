@@ -2,24 +2,43 @@ package handlers
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 
-	"github.com/baldybuilds/creatorsync/internal/server/helpers"
+	"github.com/baldybuilds/creatorsync/internal/database"
 	"github.com/baldybuilds/creatorsync/internal/server/models"
 	"github.com/baldybuilds/creatorsync/internal/twitch"
 	"github.com/gofiber/fiber/v2"
 )
 
 func GetTwitchVideoAnalyticsSummaryHandler(c *fiber.Ctx) error {
-	twitchContext, err := helpers.GetTwitchRequestContext(c)
-	if err != nil {
-		return helpers.HandleTwitchError(c, err)
+	db, ok := c.Locals("db").(database.Service)
+	if !ok {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Database service not available",
+		})
 	}
 
-	twitchUserID := twitchContext.UserID
-	twitchToken := twitchContext.AccessToken
-	twitchClient := twitchContext.Client
+	tokenHelper, err := twitch.NewTwitchTokenHelper(db)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to initialize token helper",
+		})
+	}
+
+	twitchContext, err := tokenHelper.GetTwitchRequestContext(c)
+	if err != nil {
+		return twitch.HandleTwitchError(c, err)
+	}
+
+	// Get basic Twitch client for video operations
+	twitchClient, err := twitch.NewClient(os.Getenv("TWITCH_CLIENT_ID"), os.Getenv("TWITCH_CLIENT_SECRET"))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to initialize Twitch client",
+		})
+	}
 
 	// Parse query parameters
 	periodDaysQuery := c.Query("period_days", "0") // Default to 0 (all time / up to video_limit)
@@ -38,7 +57,7 @@ func GetTwitchVideoAnalyticsSummaryHandler(c *fiber.Ctx) error {
 	}
 
 	// Fetch videos - GetUserVideos fetches most recent 'videoLimit' videos
-	fetchedVideos, _, err := twitchClient.GetUserVideos(c.Context(), twitchToken, twitchUserID, videoLimit)
+	fetchedVideos, _, err := twitchClient.GetUserVideos(c.Context(), twitchContext.Token.AccessToken, twitchContext.TwitchUserID, videoLimit)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to fetch Twitch videos: %v", err)})
 	}

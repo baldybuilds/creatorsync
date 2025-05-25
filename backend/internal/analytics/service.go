@@ -11,55 +11,48 @@ import (
 )
 
 type Service interface {
-	// Data retrieval for dashboard
 	GetDashboardOverview(ctx context.Context, userID string) (*DashboardOverview, error)
 	GetAnalyticsChartData(ctx context.Context, userID string, days int) (*AnalyticsChartData, error)
 	GetDetailedAnalytics(ctx context.Context, userID string) (*DetailedAnalytics, error)
 	GetEnhancedAnalytics(ctx context.Context, userID string, days int) (*EnhancedAnalytics, error)
 
-	// Manual data collection triggers
 	TriggerDataCollection(ctx context.Context, userID string) error
 	RefreshChannelData(ctx context.Context, userID string) error
 
-	// Data analysis
 	GetGrowthAnalysis(ctx context.Context, userID string, period string) (*GrowthAnalysis, error)
 	GetContentPerformance(ctx context.Context, userID string) (*ContentPerformance, error)
-
-	// Job management
 	GetAnalyticsJobs(ctx context.Context, userID string, limit int) ([]AnalyticsJob, error)
-
-	// System stats (admin only)
 	GetSystemStats(ctx context.Context) (*SystemStats, error)
 
-	// Data freshness check
-	CheckUserAnalyticsData(ctx context.Context, userID string) (hasData bool, lastUpdate *time.Time, err error)
+	CheckUserAnalyticsData(ctx context.Context, userID string) (bool, *time.Time, error)
+	CheckTwitchConnection(ctx context.Context, userID string) (bool, error)
+	IsHealthy() bool
 }
 
 type service struct {
-	repo      Repository
-	collector DataCollector
-	db        database.Service
+	dbService    database.DatabaseInterface
+	standardDB   database.Service
+	twitchClient *twitch.Client
+	repository   Repository
 }
 
-func NewService(db database.Service, twitchClient *twitch.Client) Service {
-	repo := NewRepository(db)
-	collector := NewDataCollector(repo, twitchClient)
+func NewService(dbService database.DatabaseInterface, twitchClient *twitch.Client) Service {
+	standardDB := dbService.GetStandardDB()
 
 	return &service{
-		repo:      repo,
-		collector: collector,
-		db:        db,
+		dbService:    dbService,
+		standardDB:   standardDB,
+		twitchClient: twitchClient,
+		repository:   NewRepository(standardDB),
 	}
 }
 
-// GetDashboardOverview returns summary metrics for the main dashboard
 func (s *service) GetDashboardOverview(ctx context.Context, userID string) (*DashboardOverview, error) {
-	overview, err := s.repo.GetDashboardOverview(ctx, userID)
+	overview, err := s.repository.GetDashboardOverview(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get dashboard overview: %w", err)
 	}
 
-	// If no data exists, return default overview
 	if overview.CurrentFollowers == 0 && overview.TotalViews == 0 {
 		return &DashboardOverview{
 			CurrentFollowers:   0,
@@ -72,14 +65,12 @@ func (s *service) GetDashboardOverview(ctx context.Context, userID string) (*Das
 	return overview, nil
 }
 
-// GetAnalyticsChartData returns chart data for analytics visualization
 func (s *service) GetAnalyticsChartData(ctx context.Context, userID string, days int) (*AnalyticsChartData, error) {
-	chartData, err := s.repo.GetAnalyticsChartData(ctx, userID, days)
+	chartData, err := s.repository.GetAnalyticsChartData(ctx, userID, days)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chart data: %w", err)
 	}
 
-	// Generate mock data if no real data exists yet
 	if len(chartData.FollowerGrowth) == 0 {
 		chartData = s.generateMockChartData(days)
 	}
@@ -87,192 +78,362 @@ func (s *service) GetAnalyticsChartData(ctx context.Context, userID string, days
 	return chartData, nil
 }
 
-// GetDetailedAnalytics returns comprehensive analytics for the analytics page
 func (s *service) GetDetailedAnalytics(ctx context.Context, userID string) (*DetailedAnalytics, error) {
-	analytics, err := s.repo.GetDetailedAnalytics(ctx, userID)
+	analytics, err := s.repository.GetDetailedAnalytics(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get detailed analytics: %w", err)
 	}
 
-	// Generate recent activity
 	analytics.RecentActivity = s.generateRecentActivity(userID)
-
 	return analytics, nil
 }
 
-// GetEnhancedAnalytics returns video-based analytics for the new dashboard design
 func (s *service) GetEnhancedAnalytics(ctx context.Context, userID string, days int) (*EnhancedAnalytics, error) {
-	analytics, err := s.repo.GetEnhancedAnalytics(ctx, userID, days)
+	log.Printf("📊 GetEnhancedAnalytics: Starting for user %s (days: %d)", userID, days)
+
+	conn, err := s.dbService.GetConnection(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get enhanced analytics: %w", err)
+		log.Printf("❌ Failed to get database connection, falling back to legacy: %v", err)
+		return s.fallbackToLegacy(ctx, userID, days)
+	}
+	defer conn.Close()
+
+	videoCount, err := s.repository.GetVideoCount(ctx, conn, userID)
+	if err != nil {
+		log.Printf("❌ Failed to get video count: %v", err)
+		return s.fallbackToLegacy(ctx, userID, days)
 	}
 
-	// If no video data exists, return default structure with zero values
-	if analytics.Overview.VideoCount == 0 {
-		return &EnhancedAnalytics{
-			Overview: VideoBasedOverview{
-				TotalViews:           0,
-				VideoCount:           0,
-				AverageViewsPerVideo: 0,
-				TotalWatchTimeHours:  0,
-				CurrentFollowers:     analytics.Overview.CurrentFollowers,
-				CurrentSubscribers:   analytics.Overview.CurrentSubscribers,
-				FollowerChange:       0,
-				SubscriberChange:     0,
-			},
-			Performance: PerformanceData{
-				ViewsOverTime:       []ChartDataPoint{},
-				ContentDistribution: []ContentTypeData{},
-			},
-			TopVideos:    []VideoAnalytics{},
-			RecentVideos: []VideoAnalytics{},
-		}, nil
+	if videoCount == 0 {
+		log.Printf("⚠️ No video data found for user %s", userID)
+		return s.getEmptyAnalytics(), nil
 	}
+
+	// Get all videos for overview metrics (total views, etc.)
+	allVideos, err := s.repository.GetVideos(ctx, conn, userID, 50)
+	if err != nil {
+		log.Printf("❌ Failed to get videos: %v", err)
+		return s.fallbackToLegacy(ctx, userID, days)
+	}
+
+	// Get time-filtered videos for chart data
+	filteredVideos, err := s.repository.GetVideosInDateRange(ctx, conn, userID, days, 50)
+	if err != nil {
+		log.Printf("❌ Failed to get filtered videos: %v", err)
+		filteredVideos = allVideos // Fallback to all videos
+	}
+
+	// Get channel data for followers/subscribers
+	overview, err := s.repository.GetDashboardOverview(ctx, userID)
+	if err != nil {
+		log.Printf("⚠️ Failed to get channel data, using defaults: %v", err)
+		overview = &DashboardOverview{CurrentFollowers: 0, CurrentSubscribers: 0}
+	}
+
+	analytics := s.buildAnalyticsFromVideos(allVideos, filteredVideos, videoCount, overview)
+	log.Printf("✅ Enhanced analytics completed for user %s", userID)
 
 	return analytics, nil
 }
 
-// TriggerDataCollection manually triggers data collection for a user
 func (s *service) TriggerDataCollection(ctx context.Context, userID string) error {
-	log.Printf("Manually triggering data collection for user %s", userID)
+	log.Printf("🚀 Triggering data collection for user %s", userID)
 
-	go func() {
-		// Run in background to avoid blocking the API response
-		bgCtx := context.Background()
-		if err := s.collector.CollectAllUserData(bgCtx, userID); err != nil {
-			log.Printf("Background data collection failed for user %s: %v", userID, err)
+	conn, err := s.dbService.GetConnection(ctx)
+	if err != nil {
+		log.Printf("❌ Failed to get database connection: %v", err)
+		return fmt.Errorf("database connection failed: %w", err)
+	}
+	defer conn.Close()
+
+	return s.collectUserData(ctx, conn, userID)
+}
+
+func (s *service) RefreshChannelData(ctx context.Context, userID string) error {
+	return s.TriggerDataCollection(ctx, userID)
+}
+
+func (s *service) GetGrowthAnalysis(ctx context.Context, userID string, period string) (*GrowthAnalysis, error) {
+	return &GrowthAnalysis{
+		Period:  period,
+		Metrics: make(map[string]GrowthMetric),
+	}, nil
+}
+
+func (s *service) GetContentPerformance(ctx context.Context, userID string) (*ContentPerformance, error) {
+	return &ContentPerformance{
+		TopVideos: []VideoAnalytics{},
+		TopGames:  []GameAnalytics{},
+		Insights:  []string{},
+	}, nil
+}
+
+func (s *service) GetAnalyticsJobs(ctx context.Context, userID string, limit int) ([]AnalyticsJob, error) {
+	return []AnalyticsJob{}, nil
+}
+
+func (s *service) GetSystemStats(ctx context.Context) (*SystemStats, error) {
+	return &SystemStats{
+		TotalUsers:            0,
+		ActiveUsers:           0,
+		TotalJobs:             0,
+		SuccessfulJobs:        0,
+		FailedJobs:            0,
+		SuccessRate:           0,
+		AverageCollectionTime: "0s",
+		LastCollectionRun:     time.Now(),
+	}, nil
+}
+
+func (s *service) CheckUserAnalyticsData(ctx context.Context, userID string) (bool, *time.Time, error) {
+	conn, err := s.dbService.GetConnection(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	defer conn.Close()
+
+	count, err := s.repository.GetVideoCount(ctx, conn, userID)
+	if err != nil {
+		return false, nil, err
+	}
+
+	hasData := count > 0
+	var lastUpdate *time.Time
+
+	if hasData {
+		var maxTime time.Time
+		row := conn.QueryRow(ctx, "SELECT MAX(updated_at) FROM video_analytics WHERE user_id = $1", userID)
+		if err := row.Scan(&maxTime); err == nil {
+			lastUpdate = &maxTime
 		}
-	}()
+	}
 
+	return hasData, lastUpdate, nil
+}
+
+func (s *service) CheckTwitchConnection(ctx context.Context, userID string) (bool, error) {
+	// Use the same token helper approach as other parts of the system for consistency
+	tokenHelper, err := twitch.NewTwitchTokenHelper(s.standardDB)
+	if err != nil {
+		log.Printf("❌ Failed to create token helper for connection check: %v", err)
+		return false, err
+	}
+
+	// Try to get a valid token - this will handle refresh if needed
+	_, err = tokenHelper.GetValidTokenForUser(ctx, userID)
+	if err != nil {
+		if err.Error() == "twitch not connected" {
+			return false, nil // Not connected, but no error
+		}
+		log.Printf("❌ Token validation failed for user %s: %v", userID, err)
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (s *service) IsHealthy() bool {
+	return s.dbService.IsHealthy()
+}
+
+func (s *service) collectUserData(ctx context.Context, conn *database.RequestConnection, userID string) error {
+	// Use a context with timeout to prevent hanging operations
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	// Collect both video data and channel data
+	err := s.collectVideoData(ctxWithTimeout, conn, userID)
+	if err != nil {
+		log.Printf("❌ Video data collection failed for user %s: %v", userID, err)
+		return err
+	}
+
+	err = s.collectChannelData(ctxWithTimeout, conn, userID)
+	if err != nil {
+		log.Printf("❌ Channel data collection failed for user %s: %v", userID, err)
+		return err
+	}
+
+	log.Printf("✅ Data collection completed for user %s", userID)
 	return nil
 }
 
-// RefreshChannelData specifically refreshes channel metrics
-func (s *service) RefreshChannelData(ctx context.Context, userID string) error {
-	return s.collector.CollectDailyChannelData(ctx, userID)
+func (s *service) collectVideoData(ctx context.Context, conn *database.RequestConnection, userID string) error {
+	oauthConfig, err := twitch.NewOAuthConfig()
+	if err != nil {
+		return fmt.Errorf("failed to create OAuth config: %w", err)
+	}
+
+	token, err := oauthConfig.GetStoredTokens(ctx, s.standardDB, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get Twitch token: %w", err)
+	}
+
+	userInfo, err := s.twitchClient.GetUserInfo(token.AccessToken)
+	if err != nil {
+		return fmt.Errorf("failed to get user info: %w", err)
+	}
+
+	videos, err := s.fetchAllVideos(ctx, token.AccessToken, userInfo.ID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch videos: %w", err)
+	}
+
+	savedCount, err := s.repository.SaveVideos(ctx, conn, userID, videos)
+	if err != nil {
+		return fmt.Errorf("failed to save videos: %w", err)
+	}
+
+	log.Printf("🎉 Saved %d videos for user %s", savedCount, userID)
+	return nil
 }
 
-// GetGrowthAnalysis provides growth trend analysis
-func (s *service) GetGrowthAnalysis(ctx context.Context, userID string, period string) (*GrowthAnalysis, error) {
-	// Get historical data based on period
-	var days int
-	switch period {
-	case "week":
-		days = 7
-	case "month":
-		days = 30
-	case "quarter":
-		days = 90
-	case "year":
-		days = 365
-	default:
-		days = 30
-	}
+func (s *service) collectChannelData(ctx context.Context, conn *database.RequestConnection, userID string) error {
+	log.Printf("📊 Collecting channel data for user %s", userID)
 
-	analytics, err := s.repo.GetChannelAnalytics(ctx, userID, days)
+	oauthConfig, err := twitch.NewOAuthConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get growth analysis: %w", err)
+		return fmt.Errorf("failed to create OAuth config: %w", err)
 	}
 
-	// Calculate growth metrics
-	growth := &GrowthAnalysis{
-		Period:  period,
-		Metrics: make(map[string]GrowthMetric),
+	token, err := oauthConfig.GetStoredTokens(ctx, s.standardDB, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get Twitch token: %w", err)
 	}
 
-	if len(analytics) >= 2 {
-		latest := analytics[0]
-		oldest := analytics[len(analytics)-1]
+	userInfo, err := s.twitchClient.GetUserInfo(token.AccessToken)
+	if err != nil {
+		return fmt.Errorf("failed to get user info: %w", err)
+	}
 
-		// Calculate follower growth
-		followerGrowth := latest.FollowersCount - oldest.FollowersCount
-		followerPercent := 0.0
-		if oldest.FollowersCount > 0 {
-			followerPercent = float64(followerGrowth) / float64(oldest.FollowersCount) * 100
+	followerCount, err := s.twitchClient.GetFollowerCount(token.AccessToken)
+	if err != nil {
+		log.Printf("⚠️ Failed to get follower count: %v", err)
+		followerCount = 0
+	}
+
+	subscriberCount, err := s.twitchClient.GetSubscriberCount(token.AccessToken)
+	if err != nil {
+		log.Printf("⚠️ Failed to get subscriber count: %v", err)
+		subscriberCount = 0
+	}
+
+	query := `
+		INSERT INTO channel_analytics (
+			user_id, date, followers_count, following_count, 
+			total_views, subscriber_count
+		) VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)
+		ON CONFLICT (user_id, date) 
+		DO UPDATE SET 
+			followers_count = EXCLUDED.followers_count,
+			following_count = EXCLUDED.following_count,
+			total_views = EXCLUDED.total_views,
+			subscriber_count = EXCLUDED.subscriber_count
+	`
+
+	_, err = conn.Exec(ctx, query, userID, followerCount, 0, userInfo.ViewCount, subscriberCount)
+	if err != nil {
+		return fmt.Errorf("failed to save channel data: %w", err)
+	}
+
+	log.Printf("📈 Saved channel data for user %s (followers: %d, subscribers: %d, views: %d)",
+		userID, followerCount, subscriberCount, userInfo.ViewCount)
+	return nil
+}
+
+func (s *service) fetchAllVideos(ctx context.Context, token, twitchUserID string) ([]twitch.VideoInfo, error) {
+	var allVideos []twitch.VideoInfo
+	limit := 100
+	maxVideos := 500
+
+	for len(allVideos) < maxVideos {
+		videos, _, err := s.twitchClient.GetUserVideos(ctx, token, twitchUserID, limit)
+		if err != nil {
+			return allVideos, err
 		}
 
-		growth.Metrics["followers"] = GrowthMetric{
-			Current:       latest.FollowersCount,
-			Previous:      oldest.FollowersCount,
-			Change:        followerGrowth,
-			PercentChange: followerPercent,
-			Trend:         getTrend(followerPercent),
+		if len(videos) == 0 || len(videos) < limit {
+			allVideos = append(allVideos, videos...)
+			break
 		}
 
-		// Calculate view growth
-		viewGrowth := latest.TotalViews - oldest.TotalViews
-		viewPercent := 0.0
-		if oldest.TotalViews > 0 {
-			viewPercent = float64(viewGrowth) / float64(oldest.TotalViews) * 100
-		}
-
-		growth.Metrics["views"] = GrowthMetric{
-			Current:       latest.TotalViews,
-			Previous:      oldest.TotalViews,
-			Change:        viewGrowth,
-			PercentChange: viewPercent,
-			Trend:         getTrend(viewPercent),
-		}
+		allVideos = append(allVideos, videos...)
 	}
 
-	return growth, nil
+	return allVideos, nil
 }
 
-// GetContentPerformance analyzes video and stream performance
-func (s *service) GetContentPerformance(ctx context.Context, userID string) (*ContentPerformance, error) {
-	// Get top videos
-	videos, err := s.repo.GetVideoAnalytics(ctx, userID, 10)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get video analytics: %w", err)
-	}
-
-	// Get top games
-	games, err := s.repo.GetTopGames(ctx, userID, 5)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get game analytics: %w", err)
-	}
-
-	performance := &ContentPerformance{
-		TopVideos: videos,
-		TopGames:  games,
-		Insights:  s.generateContentInsights(videos, games),
-	}
-
-	return performance, nil
+func (s *service) fallbackToLegacy(ctx context.Context, userID string, days int) (*EnhancedAnalytics, error) {
+	log.Printf("⚠️ Falling back to legacy analytics for user %s", userID)
+	return s.repository.GetEnhancedAnalytics(ctx, userID, days)
 }
 
-// GetAnalyticsJobs returns the status of analytics jobs for a user
-func (s *service) GetAnalyticsJobs(ctx context.Context, userID string, limit int) ([]AnalyticsJob, error) {
-	jobs, err := s.repo.GetAnalyticsJobs(ctx, userID, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get analytics jobs: %w", err)
+func (s *service) getEmptyAnalytics() *EnhancedAnalytics {
+	return &EnhancedAnalytics{
+		Overview: VideoBasedOverview{
+			TotalViews:           0,
+			VideoCount:           0,
+			AverageViewsPerVideo: 0,
+			TotalWatchTimeHours:  0,
+			CurrentFollowers:     0,
+			CurrentSubscribers:   0,
+			FollowerChange:       0,
+			SubscriberChange:     0,
+		},
+		Performance: PerformanceData{
+			ViewsOverTime:       []ChartDataPoint{},
+			ContentDistribution: []ContentTypeData{},
+		},
+		TopVideos:    []VideoAnalytics{},
+		RecentVideos: []VideoAnalytics{},
 	}
-	return jobs, nil
 }
 
-// GetSystemStats returns system-wide analytics statistics
-func (s *service) GetSystemStats(ctx context.Context) (*SystemStats, error) {
-	stats, err := s.repo.GetSystemStats(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get system stats: %w", err)
+func (s *service) buildAnalyticsFromVideos(allVideos []VideoAnalytics, filteredVideos []VideoAnalytics, videoCount int, overview *DashboardOverview) *EnhancedAnalytics {
+	// Calculate overview metrics from ALL videos (all-time data)
+	totalViews := 0
+	totalWatchTimeSeconds := 0
+
+	for _, video := range allVideos {
+		totalViews += video.ViewCount
+		totalWatchTimeSeconds += video.Duration
 	}
-	return stats, nil
+
+	avgViews := float64(0)
+	if len(allVideos) > 0 {
+		avgViews = float64(totalViews) / float64(len(allVideos))
+	}
+
+	// Generate chart data from FILTERED videos (respects time range)
+	viewsOverTime := s.generateViewsOverTime(filteredVideos)
+	contentDistribution := s.generateContentDistribution(filteredVideos)
+
+	return &EnhancedAnalytics{
+		Overview: VideoBasedOverview{
+			TotalViews:           totalViews,
+			VideoCount:           videoCount,
+			AverageViewsPerVideo: avgViews,
+			TotalWatchTimeHours:  float64(totalWatchTimeSeconds) / 3600.0,
+			CurrentFollowers:     overview.CurrentFollowers,
+			CurrentSubscribers:   overview.CurrentSubscribers,
+			FollowerChange:       overview.FollowerChange,
+			SubscriberChange:     overview.SubscriberChange,
+		},
+		Performance: PerformanceData{
+			ViewsOverTime:       viewsOverTime,
+			ContentDistribution: contentDistribution,
+		},
+		TopVideos:    s.limitVideos(filteredVideos, 10),
+		RecentVideos: s.limitVideos(filteredVideos, 10),
+	}
 }
 
-// CheckUserAnalyticsData checks if a user has analytics data and when it was last updated
-func (s *service) CheckUserAnalyticsData(ctx context.Context, userID string) (bool, *time.Time, error) {
-	return s.repo.CheckUserAnalyticsData(ctx, userID)
-}
-
-// Helper function to generate mock chart data when no real data exists
 func (s *service) generateMockChartData(days int) *AnalyticsChartData {
 	chartData := &AnalyticsChartData{}
 
-	// Generate mock follower growth data
 	baseFollowers := 1000
 	for i := days; i >= 0; i-- {
 		date := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
-		// Simulate growth with some randomness
 		growth := baseFollowers + (days-i)*5 + (i%3)*2
 		chartData.FollowerGrowth = append(chartData.FollowerGrowth, ChartDataPoint{
 			Date:  date,
@@ -280,10 +441,8 @@ func (s *service) generateMockChartData(days int) *AnalyticsChartData {
 		})
 	}
 
-	// Generate mock viewership trends
 	for i := days; i >= 0; i-- {
 		date := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
-		// Simulate viewership with some variance
 		viewers := 50 + (i%7)*20 + (i%3)*10
 		chartData.ViewershipTrends = append(chartData.ViewershipTrends, ChartDataPoint{
 			Date:  date,
@@ -294,7 +453,6 @@ func (s *service) generateMockChartData(days int) *AnalyticsChartData {
 	return chartData
 }
 
-// Helper function to generate recent activity
 func (s *service) generateRecentActivity(userID string) []ActivityItem {
 	return []ActivityItem{
 		{
@@ -316,49 +474,106 @@ func (s *service) generateRecentActivity(userID string) []ActivityItem {
 			Type:        "video",
 			Title:       "New Clip Created",
 			Description: "Epic win moment got clipped",
-			Value:       "89 views",
+			Value:       "2.5k views",
 			Timestamp:   time.Now().Add(-30 * time.Minute),
-			Icon:        "video",
+			Icon:        "film",
 		},
 	}
 }
 
-// Helper function to generate content insights
-func (s *service) generateContentInsights(videos []VideoAnalytics, games []GameAnalytics) []string {
-	insights := []string{}
+func (s *service) limitVideos(videos []VideoAnalytics, limit int) []VideoAnalytics {
+	if len(videos) <= limit {
+		return videos
+	}
+	return videos[:limit]
+}
 
-	if len(videos) > 0 {
-		totalViews := 0
-		for _, video := range videos {
-			totalViews += video.ViewCount
+func (s *service) generateViewsOverTime(videos []VideoAnalytics) []ChartDataPoint {
+	if len(videos) == 0 {
+		return []ChartDataPoint{}
+	}
+
+	// Group videos by date and sum views
+	viewsByDate := make(map[string]int)
+	for _, video := range videos {
+		if video.PublishedAt != nil {
+			dateStr := video.PublishedAt.Format("2006-01-02")
+			viewsByDate[dateStr] += video.ViewCount
 		}
-		avgViews := totalViews / len(videos)
-		insights = append(insights, fmt.Sprintf("Your videos average %d views", avgViews))
 	}
 
-	if len(games) > 0 {
-		topGame := games[0]
-		insights = append(insights, fmt.Sprintf("%s is your most streamed game with %.1f hours", topGame.GameName, topGame.TotalHoursStreamed))
+	// Convert to sorted chart data points
+	var chartData []ChartDataPoint
+	for date, views := range viewsByDate {
+		chartData = append(chartData, ChartDataPoint{
+			Date:  date,
+			Value: float64(views),
+		})
 	}
 
-	if len(insights) == 0 {
-		insights = append(insights, "Start streaming to see performance insights!")
+	// Sort by date
+	for i := 0; i < len(chartData); i++ {
+		for j := i + 1; j < len(chartData); j++ {
+			if chartData[i].Date > chartData[j].Date {
+				chartData[i], chartData[j] = chartData[j], chartData[i]
+			}
+		}
 	}
 
-	return insights
+	return chartData
 }
 
-// Helper function to determine trend direction
-func getTrend(percent float64) string {
-	if percent > 5 {
-		return "up"
-	} else if percent < -5 {
-		return "down"
+func (s *service) generateContentDistribution(videos []VideoAnalytics) []ContentTypeData {
+	if len(videos) == 0 {
+		return []ContentTypeData{}
 	}
-	return "stable"
+
+	// Group content by date and type
+	distributionByDate := make(map[string]map[string]int)
+	for _, video := range videos {
+		if video.PublishedAt != nil {
+			dateStr := video.PublishedAt.Format("2006-01-02")
+			if distributionByDate[dateStr] == nil {
+				distributionByDate[dateStr] = make(map[string]int)
+			}
+
+			// Categorize video types
+			switch video.VideoType {
+			case "archive":
+				distributionByDate[dateStr]["broadcasts"]++
+			case "highlight", "clip":
+				distributionByDate[dateStr]["clips"]++
+			case "upload":
+				distributionByDate[dateStr]["uploads"]++
+			default:
+				distributionByDate[dateStr]["uploads"]++ // Default to uploads
+			}
+		}
+	}
+
+	// Convert to sorted chart data
+	var chartData []ContentTypeData
+	for date, types := range distributionByDate {
+		chartData = append(chartData, ContentTypeData{
+			Date:       date,
+			Broadcasts: types["broadcasts"],
+			Clips:      types["clips"],
+			Uploads:    types["uploads"],
+		})
+	}
+
+	// Sort by date
+	for i := 0; i < len(chartData); i++ {
+		for j := i + 1; j < len(chartData); j++ {
+			if chartData[i].Date > chartData[j].Date {
+				chartData[i], chartData[j] = chartData[j], chartData[i]
+			}
+		}
+	}
+
+	return chartData
 }
 
-// Additional types for analytics responses
 type GrowthAnalysis struct {
 	Period  string                  `json:"period"`
 	Metrics map[string]GrowthMetric `json:"metrics"`
@@ -369,7 +584,7 @@ type GrowthMetric struct {
 	Previous      int     `json:"previous"`
 	Change        int     `json:"change"`
 	PercentChange float64 `json:"percent_change"`
-	Trend         string  `json:"trend"` // "up", "down", "stable"
+	Trend         string  `json:"trend"`
 }
 
 type ContentPerformance struct {

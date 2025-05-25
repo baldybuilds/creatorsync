@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/baldybuilds/creatorsync/internal/clerk"
@@ -15,6 +16,14 @@ import (
 type Handlers struct {
 	service                 Service
 	backgroundCollectionMgr *BackgroundCollectionManager
+	activeRequests          sync.Map // Track active requests to prevent duplicates
+}
+
+// RequestInfo tracks active request information
+type RequestInfo struct {
+	UserID    string
+	StartTime time.Time
+	RequestID string
 }
 
 func NewHandlers(service Service, backgroundCollectionMgr *BackgroundCollectionManager) *Handlers {
@@ -179,24 +188,71 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		})
 	}
 
-	log.Printf("🔍 GetEnhancedAnalytics: Starting for user %s", userID)
+	// Get request ID for tracking
+	requestID := c.Query("requestId", fmt.Sprintf("server-%d", time.Now().UnixNano()))
+	log.Printf("🔍 GetEnhancedAnalytics: Starting for user %s (requestId: %s)", userID, requestID)
+
+	// Check for existing active request for this user
+	if existing, loaded := h.activeRequests.LoadOrStore(userID, &RequestInfo{
+		UserID:    userID,
+		StartTime: time.Now(),
+		RequestID: requestID,
+	}); loaded {
+		existingReq := existing.(*RequestInfo)
+		elapsed := time.Since(existingReq.StartTime)
+
+		// If there's a request that's been running for less than 30 seconds, reject this one
+		if elapsed < 30*time.Second {
+			log.Printf("🚫 GetEnhancedAnalytics: Rejecting duplicate request %s for user %s (existing: %s, elapsed: %v)",
+				requestID, userID, existingReq.RequestID, elapsed)
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error":       "Request already in progress",
+				"details":     fmt.Sprintf("Existing request %s started %v ago", existingReq.RequestID, elapsed),
+				"requestId":   requestID,
+				"retry_after": "30",
+			})
+		} else {
+			// Old request, replace it
+			log.Printf("🔄 GetEnhancedAnalytics: Replacing stale request for user %s (old: %s, new: %s)",
+				userID, existingReq.RequestID, requestID)
+			h.activeRequests.Store(userID, &RequestInfo{
+				UserID:    userID,
+				StartTime: time.Now(),
+				RequestID: requestID,
+			})
+		}
+	}
+
+	// Ensure cleanup happens regardless of how the function exits
+	defer func() {
+		h.activeRequests.Delete(userID)
+		log.Printf("🧹 GetEnhancedAnalytics: Cleaned up active request for user %s (requestId: %s)", userID, requestID)
+	}()
 
 	// Create a context with timeout to prevent hanging requests
 	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 	defer cancel()
 
+	// Add early database health check
+	if h.service.(*service).db.Health()["status"] != "up" {
+		log.Printf("❌ GetEnhancedAnalytics: Database unhealthy for request %s", requestID)
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Database temporarily unavailable",
+		})
+	}
+
 	// Ensure user exists in database before proceeding
 	analyticsRepo := NewRepository(h.service.(*service).db)
 	existingUser, err := analyticsRepo.GetUserByClerkID(ctx, userID)
 	if err != nil {
-		log.Printf("❌ GetEnhancedAnalytics: Failed to check user %s: %v", userID, err)
+		log.Printf("❌ GetEnhancedAnalytics: Failed to check user %s (requestId: %s): %v", userID, requestID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to verify user account",
 		})
 	}
 
 	if existingUser == nil {
-		log.Printf("🔍 GetEnhancedAnalytics: User %s doesn't exist, creating minimal record", userID)
+		log.Printf("🔍 GetEnhancedAnalytics: User %s doesn't exist, creating minimal record (requestId: %s)", userID, requestID)
 		// Create minimal user record for cross-environment compatibility
 		user := &User{
 			ID:          userID,
@@ -207,12 +263,12 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		}
 
 		if err := analyticsRepo.CreateOrUpdateUser(ctx, user); err != nil {
-			log.Printf("❌ GetEnhancedAnalytics: Failed to create user %s: %v", userID, err)
+			log.Printf("❌ GetEnhancedAnalytics: Failed to create user %s (requestId: %s): %v", userID, requestID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to initialize user account",
 			})
 		}
-		log.Printf("✅ GetEnhancedAnalytics: Created minimal user record for %s", userID)
+		log.Printf("✅ GetEnhancedAnalytics: Created minimal user record for %s (requestId: %s)", userID, requestID)
 	}
 
 	// Get days parameter (default to 30)
@@ -222,52 +278,52 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 		days = 30
 	}
 
-	log.Printf("📊 GetEnhancedAnalytics: Fetching analytics for user %s (days: %d)", userID, days)
+	log.Printf("📊 GetEnhancedAnalytics: Fetching analytics for user %s (days: %d, requestId: %s)", userID, days, requestID)
 
 	// Get analytics with error handling and retries
 	var analytics *EnhancedAnalytics
 	var analyticsErr error
 
-	for attempt := 1; attempt <= 3; attempt++ {
-		analytics, analyticsErr = h.service.GetEnhancedAnalytics(ctx, userID, days)
-		if analyticsErr == nil {
-			break
-		}
-
-		log.Printf("⚠️ GetEnhancedAnalytics: Attempt %d failed for user %s: %v", attempt, userID, analyticsErr)
-
-		// If it's a database connection issue, wait and retry
-		if attempt < 3 {
-			time.Sleep(time.Duration(attempt) * time.Second)
-		}
-	}
+	// Single attempt with comprehensive error handling - no retries to avoid amplifying concurrency issues
+	startTime := time.Now()
+	analytics, analyticsErr = h.service.GetEnhancedAnalytics(ctx, userID, days)
+	duration := time.Since(startTime)
 
 	if analyticsErr != nil {
-		log.Printf("❌ GetEnhancedAnalytics: All attempts failed for user %s: %v", userID, analyticsErr)
+		log.Printf("❌ GetEnhancedAnalytics: Failed for user %s (requestId: %s, duration: %v): %v", userID, requestID, duration, analyticsErr)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "Failed to get enhanced analytics",
-			"details": analyticsErr.Error(),
+			"error":     "Failed to get enhanced analytics",
+			"details":   analyticsErr.Error(),
+			"requestId": requestID,
 		})
 	}
 
-	log.Printf("✅ GetEnhancedAnalytics: Successfully retrieved analytics for user %s", userID)
+	log.Printf("✅ GetEnhancedAnalytics: Successfully retrieved analytics for user %s (requestId: %s, duration: %v)", userID, requestID, duration)
 
 	// Add comprehensive logging before response
-	log.Printf("📊 GetEnhancedAnalytics: Response data - Overview: %+v", analytics.Overview)
-	log.Printf("📊 GetEnhancedAnalytics: Response data - Top videos: %d, Recent videos: %d",
-		len(analytics.TopVideos), len(analytics.RecentVideos))
+	log.Printf("📊 GetEnhancedAnalytics: Response data for %s (requestId: %s) - Videos: %d total, Followers: %d, Views: %d",
+		userID, requestID, analytics.Overview.VideoCount, analytics.Overview.CurrentFollowers, analytics.Overview.TotalViews)
+	log.Printf("📊 GetEnhancedAnalytics: Response arrays for %s (requestId: %s) - Top videos: %d, Recent videos: %d",
+		userID, requestID, len(analytics.TopVideos), len(analytics.RecentVideos))
 
 	// Try to send the JSON response with error handling
-	log.Printf("📤 GetEnhancedAnalytics: Sending JSON response for user %s", userID)
+	log.Printf("📤 GetEnhancedAnalytics: Sending JSON response for user %s (requestId: %s)", userID, requestID)
+
+	// Set response headers to prevent caching issues
+	c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Set("Pragma", "no-cache")
+	c.Set("Expires", "0")
+	c.Set("X-Request-ID", requestID)
 
 	if err := c.JSON(analytics); err != nil {
-		log.Printf("❌ GetEnhancedAnalytics: Failed to send JSON response for user %s: %v", userID, err)
+		log.Printf("❌ GetEnhancedAnalytics: Failed to send JSON response for user %s (requestId: %s): %v", userID, requestID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to serialize response",
+			"error":     "Failed to serialize response",
+			"requestId": requestID,
 		})
 	}
 
-	log.Printf("✅ GetEnhancedAnalytics: Successfully sent response for user %s", userID)
+	log.Printf("✅ GetEnhancedAnalytics: Successfully sent response for user %s (requestId: %s, total duration: %v)", userID, requestID, time.Since(startTime))
 	return nil
 }
 

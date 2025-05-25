@@ -61,19 +61,39 @@ func New() Service {
 		log.Fatal(err)
 	}
 
-	// Configure connection pool settings
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
-	db.SetConnMaxIdleTime(30 * time.Second)
+	// Configure connection pool settings based on environment
+	env := os.Getenv("ENVIRONMENT")
+	if env == "staging" || env == "production" {
+		// More conservative settings for cloud environments to prevent connection exhaustion
+		db.SetMaxOpenConns(10)                  // Reduced from 25 to prevent pool exhaustion
+		db.SetMaxIdleConns(3)                   // Reduced from 5 for staging/production
+		db.SetConnMaxLifetime(2 * time.Minute)  // Shorter lifetime to cycle connections faster
+		db.SetConnMaxIdleTime(15 * time.Second) // Reduced idle time
+		log.Printf("Applied %s environment database pool settings (MaxOpen: 10, MaxIdle: 3)", env)
+	} else {
+		// Development settings - more permissive
+		db.SetMaxOpenConns(15)
+		db.SetMaxIdleConns(5)
+		db.SetConnMaxLifetime(5 * time.Minute)
+		db.SetConnMaxIdleTime(30 * time.Second)
+		log.Printf("Applied development database pool settings (MaxOpen: 15, MaxIdle: 5)")
+	}
 
-	// Test the connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Test the connection with retries
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	if err := db.PingContext(ctx); err != nil {
-		log.Printf("Failed to ping database: %v", err)
-		log.Fatal(err)
+		if err := db.PingContext(ctx); err != nil {
+			log.Printf("Database ping attempt %d failed: %v", i+1, err)
+			if i == maxRetries-1 {
+				log.Fatal(err)
+			}
+			time.Sleep(time.Duration(i+1) * time.Second)
+			continue
+		}
+		break
 	}
 
 	log.Println("Database connection established successfully")
@@ -172,18 +192,39 @@ func (s *service) Reconnect() error {
 		return fmt.Errorf("failed to reconnect to database: %w", err)
 	}
 
-	// Configure connection pool settings
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
-	db.SetConnMaxIdleTime(30 * time.Second)
+	// Configure connection pool settings based on environment
+	env := os.Getenv("ENVIRONMENT")
+	if env == "staging" || env == "production" {
+		// More conservative settings for cloud environments
+		db.SetMaxOpenConns(10)
+		db.SetMaxIdleConns(3)
+		db.SetConnMaxLifetime(2 * time.Minute)
+		db.SetConnMaxIdleTime(15 * time.Second)
+		log.Printf("Applied %s environment database pool settings on reconnect", env)
+	} else {
+		// Development settings
+		db.SetMaxOpenConns(15)
+		db.SetMaxIdleConns(5)
+		db.SetConnMaxLifetime(5 * time.Minute)
+		db.SetConnMaxIdleTime(30 * time.Second)
+		log.Printf("Applied development database pool settings on reconnect")
+	}
 
-	// Test the new connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Test the new connection with retries
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("failed to ping database after reconnect: %w", err)
+		if err := db.PingContext(ctx); err != nil {
+			log.Printf("Database reconnect ping attempt %d failed: %v", i+1, err)
+			if i == maxRetries-1 {
+				return fmt.Errorf("failed to ping database after reconnect: %w", err)
+			}
+			time.Sleep(time.Duration(i+1) * time.Second)
+			continue
+		}
+		break
 	}
 
 	s.db = db

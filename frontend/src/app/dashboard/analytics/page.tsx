@@ -358,30 +358,98 @@ export default function AnalyticsPage() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [timeRange, setTimeRange] = useState('30');
+    
+    // Add request deduplication
+    const [isRequestInProgress, setIsRequestInProgress] = useState(false);
+    const [lastRequestId, setLastRequestId] = useState<string | null>(null);
 
     // Helper function to get API base URL based on environment
     const getApiBaseUrl = () => {
-        if (typeof window !== 'undefined' && window.location.hostname === 'dev.creatorsync.app') {
-            return 'https://api-dev.creatorsync.app';
-        } else if (process.env.NEXT_PUBLIC_APP_ENV === 'staging') {
-            return 'https://api-dev.creatorsync.app';
-        } else if (process.env.NODE_ENV === 'production') {
-            return 'https://api.creatorsync.app';
+        const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+        const nodeEnv = process.env.NODE_ENV;
+        const appEnv = process.env.NEXT_PUBLIC_APP_ENV;
+        
+        console.log('Environment detection:', { hostname, nodeEnv, appEnv });
+        
+        let apiUrl = '';
+        if (hostname === 'dev.creatorsync.app') {
+            apiUrl = 'https://api-dev.creatorsync.app';
+        } else if (appEnv === 'staging') {
+            apiUrl = 'https://api-dev.creatorsync.app';
+        } else if (nodeEnv === 'production') {
+            apiUrl = 'https://api.creatorsync.app';
         } else {
-            return 'http://localhost:8080';
+            apiUrl = 'http://localhost:8080';
+        }
+        
+        console.log('Selected API URL:', apiUrl);
+        return apiUrl;
+    };
+
+    // Test API connectivity
+    const testApiConnectivity = async (apiBaseUrl: string) => {
+        try {
+            console.log('Testing API connectivity to:', apiBaseUrl);
+            const response = await fetch(`${apiBaseUrl}/api/analytics/health`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('API health check successful:', data);
+                return true;
+            } else {
+                console.error('API health check failed with status:', response.status);
+                return false;
+            }
+        } catch (error) {
+            console.error('API connectivity test failed:', error);
+            return false;
         }
     };
 
-    // Fetch enhanced analytics data
-    const fetchAnalyticsData = useCallback(async () => {
+    // Fetch enhanced analytics data with request deduplication
+    const fetchAnalyticsData = useCallback(async (forceRefresh = false) => {
         if (!isLoaded || !isSignedIn) return;
+
+        // Prevent concurrent requests unless forced refresh
+        if (isRequestInProgress && !forceRefresh) {
+            console.log('Request already in progress, skipping...');
+            return;
+        }
+
+        const requestId = `${Date.now()}-${Math.random()}`;
+        console.log(`Starting analytics request ${requestId}`);
+
+        // Check if this is a duplicate request within 1 second
+        if (lastRequestId && !forceRefresh) {
+            const timeSinceLastRequest = Date.now() - parseInt(lastRequestId.split('-')[0]);
+            if (timeSinceLastRequest < 1000) {
+                console.log('Duplicate request detected, skipping...');
+                return;
+            }
+        }
+
+        setIsRequestInProgress(true);
+        setLastRequestId(requestId);
 
         try {
             const token = await getToken();
             const apiBaseUrl = getApiBaseUrl();
 
+            // Test API connectivity first
+            const isApiHealthy = await testApiConnectivity(apiBaseUrl);
+            if (!isApiHealthy) {
+                console.error('API connectivity test failed - server may be down');
+                throw new Error('API server is not accessible. Please check if the server is running.');
+            }
+
             // Sync user to ensure they exist in the database with improved error handling
             try {
+                console.log(`Syncing user with request ${requestId}`);
                 const syncResponse = await fetch(`${apiBaseUrl}/api/user/sync`, {
                     method: 'POST',
                     headers: {
@@ -403,32 +471,107 @@ export default function AnalyticsPage() {
                 // Continue anyway - analytics might still work if user already exists
             }
 
-            const response = await fetch(`${apiBaseUrl}/api/analytics/enhanced?days=${timeRange}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-            });
+            console.log(`Fetching analytics with request ${requestId}`);
+            
+            // Add retry logic for network failures
+            let lastError = null;
+            const maxRetries = 3;
+            
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    console.log(`Analytics fetch attempt ${attempt}/${maxRetries} for request ${requestId}`);
+                    
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                    
+                    const response = await fetch(`${apiBaseUrl}/api/analytics/enhanced?days=${timeRange}&requestId=${requestId}`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                        },
+                        signal: controller.signal,
+                    });
 
-            if (response.ok) {
-                const data = await response.json();
-                setAnalytics(data);
+                    clearTimeout(timeoutId);
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log(`Successfully received analytics data for request ${requestId}`);
+                        setAnalytics(data);
+                        setLoading(false);
+                        return; // Success - exit retry loop
+                    } else if (response.status === 429) {
+                        console.log(`Request ${requestId} rejected - another request in progress`);
+                        // Handle duplicate request gracefully - don't show error to user
+                        // The concurrent request should complete and provide the data
+                        return;
+                    } else {
+                        const errorText = await response.text();
+                        const error = new Error(`HTTP ${response.status}: ${errorText}`);
+                        console.error(`Analytics request ${requestId} failed with status:`, response.status, errorText);
+                        lastError = error;
+                        
+                        // Don't retry client errors (4xx), only server errors (5xx) and network issues
+                        if (response.status >= 400 && response.status < 500) {
+                            throw error; // Don't retry client errors
+                        }
+                    }
+                } catch (fetchError) {
+                    console.error(`Analytics fetch attempt ${attempt} failed for request ${requestId}:`, fetchError);
+                    lastError = fetchError;
+                    
+                    // If this is an AbortError (timeout), don't retry
+                    if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+                        throw new Error('Request timed out after 30 seconds');
+                    }
+                    
+                    // Wait before retrying (exponential backoff)
+                    if (attempt < maxRetries) {
+                        const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Cap at 5 seconds
+                        console.log(`Waiting ${waitTime}ms before retry...`);
+                        await new Promise(resolve => setTimeout(resolve, waitTime));
+                    }
+                }
             }
             
+            // If we get here, all retries failed
+            throw lastError || new Error('All retry attempts failed');
+            
+        } catch (error) {
+            console.error(`Analytics request ${requestId} failed with error:`, error);
+            
+            // Provide user-friendly error messages
+            let userMessage = 'Failed to load analytics data.';
+            if (error instanceof Error) {
+                if (error.message.includes('Failed to fetch') || error.message.includes('not accessible')) {
+                    userMessage = 'Cannot connect to server. Please check your internet connection and try again.';
+                } else if (error.message.includes('timed out')) {
+                    userMessage = 'Request timed out. The server may be experiencing high load.';
+                } else if (error.message.includes('HTTP 5')) {
+                    userMessage = 'Server error. Please try again in a few moments.';
+                }
+            }
+            
+            // Show error to user (you can implement a toast/notification system)
+            console.error('User-friendly error:', userMessage);
+            
             setLoading(false);
-        } catch {
-            setLoading(false);
+        } finally {
+            setIsRequestInProgress(false);
+            console.log(`Completed analytics request ${requestId}`);
         }
-    }, [isLoaded, isSignedIn, getToken, timeRange]);
+    }, [isLoaded, isSignedIn, getToken, timeRange, isRequestInProgress, lastRequestId]);
 
     const handleRefresh = async () => {
+        if (refreshing || isRequestInProgress) return;
+        
         setRefreshing(true);
-        await fetchAnalyticsData();
+        await fetchAnalyticsData(true); // Force refresh
         setRefreshing(false);
     };
 
     const handleManualCollection = async () => {
-        if (!isLoaded || !isSignedIn) return;
+        if (!isLoaded || !isSignedIn || isRequestInProgress) return;
 
         try {
             const token = await getToken();
@@ -445,7 +588,7 @@ export default function AnalyticsPage() {
             if (response.ok) {
                 // Refresh data after a short delay to allow collection to start
                 setTimeout(() => {
-                    fetchAnalyticsData();
+                    fetchAnalyticsData(true);
                 }, 2000);
             }
         } catch {
@@ -454,19 +597,31 @@ export default function AnalyticsPage() {
     };
 
     const handleTimeRangeChange = (newTimeRange: string) => {
+        if (newTimeRange === timeRange || isRequestInProgress) return;
+        
+        console.log(`Time range changing from ${timeRange} to ${newTimeRange}`);
         setTimeRange(newTimeRange);
     };
 
+    // Initial load effect - only run once when user is loaded
     useEffect(() => {
-        fetchAnalyticsData();
-    }, [fetchAnalyticsData]);
-
-    // Fetch data when time range changes
-    useEffect(() => {
-        if (isLoaded && isSignedIn) {
+        if (isLoaded && isSignedIn && !analytics && !isRequestInProgress) {
+            console.log('Initial analytics load');
             fetchAnalyticsData();
         }
-    }, [timeRange, isLoaded, isSignedIn, fetchAnalyticsData]);
+    }, [isLoaded, isSignedIn]); // Removed fetchAnalyticsData from dependencies
+
+    // Time range change effect - with debouncing
+    useEffect(() => {
+        if (isLoaded && isSignedIn && analytics) { // Only if we have initial data
+            console.log('Time range changed, fetching new data');
+            const timeoutId = setTimeout(() => {
+                fetchAnalyticsData();
+            }, 300); // 300ms debounce
+
+            return () => clearTimeout(timeoutId);
+        }
+    }, [timeRange]); // Only depend on timeRange
 
     if (!isLoaded || !isSignedIn) {
         return (

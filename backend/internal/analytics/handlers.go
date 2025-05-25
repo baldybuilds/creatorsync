@@ -122,19 +122,50 @@ func (h *Handlers) GetDashboardOverview(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check cache first
+	// CRITICAL: Check connection status FIRST before returning any cached data
+	twitchConnected, err := h.service.CheckTwitchConnection(c.Context(), userID)
+	if err != nil {
+		log.Printf("❌ Connection status check failed for user %s: %v", userID, err)
+		twitchConnected = false
+	}
+
+	// If disconnected, return empty state immediately - don't use cache or database
+	if !twitchConnected {
+		emptyResponse := map[string]interface{}{
+			"overview": &DashboardOverview{
+				CurrentFollowers:      0,
+				FollowerChange:        0,
+				FollowerChangePercent: 0,
+				CurrentSubscribers:    0,
+				SubscriberChange:      0,
+				TotalViews:            0,
+				ViewChange:            0,
+				AverageViewers:        0,
+				ViewerChange:          0,
+				StreamsLast30Days:     0,
+				HoursStreamedLast30:   0,
+			},
+			"connection_status": map[string]interface{}{
+				"twitch_connected": false,
+				"settings_url":     "/settings",
+			},
+		}
+		c.Set("X-Cache-Status", "DISCONNECTED")
+		return c.JSON(emptyResponse)
+	}
+
+	// Check cache only if connected
 	cache := GetAnalyticsCache()
 	if cachedData, found := cache.Get(userID, "overview"); found {
 		if response, ok := cachedData.(map[string]interface{}); ok {
+			// Verify cached data has correct connection status
+			if connStatus, exists := response["connection_status"].(map[string]interface{}); exists {
+				connStatus["twitch_connected"] = twitchConnected
+			}
 			c.Set("X-Cache-Status", "HIT")
 			return c.JSON(response)
 		} else if overview, ok := cachedData.(*DashboardOverview); ok {
 			// Legacy cache format - add connection status
-			twitchConnected, err := h.service.CheckTwitchConnection(c.Context(), userID)
-			if err != nil {
-				log.Printf("❌ Connection status check failed for user %s: %v", userID, err)
-				twitchConnected = false
-			}
 			response := map[string]interface{}{
 				"overview": overview,
 				"connection_status": map[string]interface{}{
@@ -145,13 +176,6 @@ func (h *Handlers) GetDashboardOverview(c *fiber.Ctx) error {
 			c.Set("X-Cache-Status", "HIT")
 			return c.JSON(response)
 		}
-	}
-
-	// Check connection status
-	twitchConnected, err := h.service.CheckTwitchConnection(c.Context(), userID)
-	if err != nil {
-		log.Printf("❌ Connection status check failed for user %s: %v", userID, err)
-		twitchConnected = false
 	}
 
 	overview, err := h.service.GetDashboardOverview(c.Context(), userID)
@@ -313,11 +337,41 @@ func (h *Handlers) GetEnhancedAnalytics(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
 	defer cancel()
 
-	// Check connection status
+	// CRITICAL: Check connection status FIRST before returning any cached data or fetching new data
 	twitchConnected, err := h.service.CheckTwitchConnection(ctx, userID)
 	if err != nil {
 		log.Printf("❌ Connection status check failed for user %s: %v", userID, err)
 		twitchConnected = false
+	}
+
+	// If disconnected, return empty state immediately - don't use cache or fetch new data
+	if !twitchConnected {
+		emptyResponse := map[string]interface{}{
+			"analytics": &EnhancedAnalytics{
+				Overview: VideoBasedOverview{
+					TotalViews:           0,
+					VideoCount:           0,
+					AverageViewsPerVideo: 0,
+					TotalWatchTimeHours:  0,
+					CurrentFollowers:     0,
+					CurrentSubscribers:   0,
+					FollowerChange:       0,
+					SubscriberChange:     0,
+				},
+				Performance: PerformanceData{
+					ViewsOverTime:       []ChartDataPoint{},
+					ContentDistribution: []ContentTypeData{},
+				},
+				TopVideos:    []VideoAnalytics{},
+				RecentVideos: []VideoAnalytics{},
+			},
+			"connection_status": map[string]interface{}{
+				"twitch_connected": false,
+				"settings_url":     "/settings",
+			},
+		}
+		c.Set("X-Cache-Status", "DISCONNECTED")
+		return c.JSON(emptyResponse)
 	}
 
 	// Clear any cached analytics data before fetching fresh data

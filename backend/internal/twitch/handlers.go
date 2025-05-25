@@ -212,6 +212,7 @@ func (h *TwitchOAuthHandlers) StatusHandler(c *fiber.Ctx) error {
 	})
 }
 
+// DisconnectHandler removes Twitch OAuth tokens and clears all related data
 func (h *TwitchOAuthHandlers) DisconnectHandler(c *fiber.Ctx) error {
 	user, err := clerk.GetUserFromContext(c)
 	if err != nil {
@@ -220,15 +221,49 @@ func (h *TwitchOAuthHandlers) DisconnectHandler(c *fiber.Ctx) error {
 		})
 	}
 
-	if err := h.oauthConfig.DeleteStoredTokens(c.Context(), h.db, user.ID); err != nil {
-		log.Printf("❌ Failed to delete tokens for user %s: %v", user.ID, err)
+	userID := user.ID
+	log.Printf("🔌 Disconnecting Twitch for user %s", userID)
+
+	// Delete OAuth tokens
+	err = h.oauthConfig.DeleteStoredTokens(c.Context(), h.db, userID)
+	if err != nil {
+		log.Printf("❌ Failed to delete tokens for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to disconnect Twitch account",
 		})
 	}
 
-	log.Printf("🗑️ Successfully disconnected Twitch for user %s", user.ID)
+	// Clear all analytics cache and stored data
+	go func() {
+		log.Printf("🧹 Clearing all data for disconnected user %s", userID)
+
+		// Clear cache entries
+		if _, err := h.db.GetDB().Exec(`DELETE FROM cache_entries WHERE user_id = $1`, userID); err != nil {
+			log.Printf("⚠️ Failed to clear cache for user %s: %v", userID, err)
+		}
+
+		// Clear video analytics
+		if _, err := h.db.GetDB().Exec(`DELETE FROM video_analytics WHERE user_id = $1`, userID); err != nil {
+			log.Printf("⚠️ Failed to clear video analytics for user %s: %v", userID, err)
+		}
+
+		// Clear channel analytics
+		if _, err := h.db.GetDB().Exec(`DELETE FROM channel_analytics WHERE user_id = $1`, userID); err != nil {
+			log.Printf("⚠️ Failed to clear channel analytics for user %s: %v", userID, err)
+		}
+
+		// Clear stream sessions
+		if _, err := h.db.GetDB().Exec(`DELETE FROM stream_sessions WHERE user_id = $1`, userID); err != nil {
+			log.Printf("⚠️ Failed to clear stream sessions for user %s: %v", userID, err)
+		}
+
+		log.Printf("✅ Data cleanup completed for user %s", userID)
+	}()
+
+	log.Printf("✅ Successfully disconnected Twitch for user %s", userID)
+
 	return c.JSON(fiber.Map{
+		"success": true,
 		"message": "Twitch account disconnected successfully",
 	})
 }

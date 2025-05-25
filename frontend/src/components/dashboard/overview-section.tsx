@@ -119,6 +119,65 @@ const EnhancedMetricCard = ({
     </motion.div>
 );
 
+// Zero Data State Component
+const ZeroDataState = ({ isConnected }: { isConnected: boolean }) => (
+    <motion.div
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="max-w-2xl mx-auto text-center py-16"
+    >
+        <div className="bg-gradient-to-br from-emerald-500/10 to-blue-500/10 rounded-3xl p-8 border border-emerald-500/20">
+            <div className="w-20 h-20 bg-gradient-to-br from-emerald-500 to-blue-500 rounded-full mx-auto mb-6 flex items-center justify-center">
+                <Sparkles className="w-10 h-10 text-white" />
+            </div>
+            
+            <h2 className="text-3xl font-bold text-white mb-4">
+                {isConnected ? "Welcome to Your Creator Journey!" : "Ready to Get Started?"}
+            </h2>
+            
+            <p className="text-gray-300 text-lg mb-6 leading-relaxed">
+                {isConnected 
+                    ? "We can see your Twitch account is connected, but it looks like you're just getting started. That's exciting! Every successful creator started exactly where you are now."
+                    : "Connect your Twitch account to start tracking your content performance and grow your audience with data-driven insights."
+                }
+            </p>
+            
+            {isConnected ? (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div className="bg-gray-800/50 rounded-xl p-4">
+                            <Video className="w-6 h-6 text-emerald-400 mx-auto mb-2" />
+                            <p className="text-gray-300">Create your first stream or upload content</p>
+                        </div>
+                        <div className="bg-gray-800/50 rounded-xl p-4">
+                            <Users className="w-6 h-6 text-blue-400 mx-auto mb-2" />
+                            <p className="text-gray-300">Build your community</p>
+                        </div>
+                        <div className="bg-gray-800/50 rounded-xl p-4">
+                            <TrendingUp className="w-6 h-6 text-purple-400 mx-auto mb-2" />
+                            <p className="text-gray-300">Track your growth here</p>
+                        </div>
+                    </div>
+                    
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 mt-6">
+                        <p className="text-emerald-300 text-sm">
+                            💡 <strong>Pro Tip:</strong> Once you start creating content, come back here to see detailed analytics about your performance, audience growth, and content insights!
+                        </p>
+                    </div>
+                </div>
+            ) : (
+                <button 
+                    onClick={() => window.location.href = '/settings'}
+                    className="bg-gradient-to-r from-emerald-500 to-blue-500 text-white px-8 py-3 rounded-xl font-semibold hover:shadow-lg hover:shadow-emerald-500/25 transition-all duration-300 flex items-center mx-auto"
+                >
+                    Connect Twitch Account
+                    <ArrowRight className="w-5 h-5 ml-2" />
+                </button>
+            )}
+        </div>
+    </motion.div>
+);
+
 export function OverviewSection() {
     const { isLoaded, isSignedIn, getToken } = useAuth();
     const [data, setData] = useState<OverviewData | null>(null);
@@ -150,7 +209,7 @@ export function OverviewSection() {
             const token = await getToken();
             const apiBaseUrl = getApiBaseUrl();
 
-            const response = await fetch(`${apiBaseUrl}/api/analytics/enhanced?days=7`, {
+            const response = await fetch(`${apiBaseUrl}/api/analytics/overview`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json',
@@ -161,12 +220,36 @@ export function OverviewSection() {
                 const data = await response.json();
                 console.log('Overview API Response:', data);
                 
-                // Handle both old and new response formats (same as Analytics page)
+                // Handle new backend response format with connection_status check
+                if (data.connection_status && !data.connection_status.twitch_connected) {
+                    // User is disconnected - set empty state regardless of cached data
+                    setData({
+                        overview: {
+                            totalViews: 0,
+                            videoCount: 0,
+                            averageViewsPerVideo: 0,
+                            totalWatchTimeHours: 0,
+                            currentFollowers: 0,
+                            currentSubscribers: 0,
+                            followerChange: 0,
+                            subscriberChange: 0,
+                        },
+                        recentVideos: [],
+                        connectionStatus: data.connection_status
+                    });
+                    return;
+                }
+                
+                // User is connected - process the data normally
                 let analyticsData;
                 let connectionStatus;
                 
-                if (data.analytics && data.connection_status) {
+                if (data.overview && data.connection_status) {
                     // New format with connection status
+                    analyticsData = data;
+                    connectionStatus = data.connection_status;
+                } else if (data.analytics && data.connection_status) {
+                    // Alternative new format
                     analyticsData = data.analytics;
                     connectionStatus = data.connection_status;
                 } else {
@@ -182,10 +265,10 @@ export function OverviewSection() {
                         videoCount: analyticsData.overview?.videoCount || 0,
                         averageViewsPerVideo: analyticsData.overview?.averageViewsPerVideo || 0,
                         totalWatchTimeHours: analyticsData.overview?.totalWatchTimeHours || 0,
-                        currentFollowers: analyticsData.overview?.currentFollowers || 0,
-                        currentSubscribers: analyticsData.overview?.currentSubscribers || 0,
-                        followerChange: analyticsData.overview?.followerChange || 0,
-                        subscriberChange: analyticsData.overview?.subscriberChange || 0,
+                        currentFollowers: analyticsData.overview?.currentFollowers || analyticsData.overview?.CurrentFollowers || 0,
+                        currentSubscribers: analyticsData.overview?.currentSubscribers || analyticsData.overview?.CurrentSubscribers || 0,
+                        followerChange: analyticsData.overview?.followerChange || analyticsData.overview?.FollowerChange || 0,
+                        subscriberChange: analyticsData.overview?.subscriberChange || analyticsData.overview?.SubscriberChange || 0,
                     },
                     recentVideos: (analyticsData.recentVideos || []).slice(0, 3),
                     connectionStatus: connectionStatus
@@ -194,9 +277,39 @@ export function OverviewSection() {
                 setData(overviewData);
             } else {
                 console.error('Failed to fetch overview data:', response.status);
+                // If fetch fails, assume disconnected state
+                setData({
+                    overview: {
+                        totalViews: 0,
+                        videoCount: 0,
+                        averageViewsPerVideo: 0,
+                        totalWatchTimeHours: 0,
+                        currentFollowers: 0,
+                        currentSubscribers: 0,
+                        followerChange: 0,
+                        subscriberChange: 0,
+                    },
+                    recentVideos: [],
+                    connectionStatus: { twitch_connected: false }
+                });
             }
         } catch (error) {
             console.error('Error fetching overview data:', error);
+            // On error, assume disconnected state
+            setData({
+                overview: {
+                    totalViews: 0,
+                    videoCount: 0,
+                    averageViewsPerVideo: 0,
+                    totalWatchTimeHours: 0,
+                    currentFollowers: 0,
+                    currentSubscribers: 0,
+                    followerChange: 0,
+                    subscriberChange: 0,
+                },
+                recentVideos: [],
+                connectionStatus: { twitch_connected: false }
+            });
         } finally {
             setLoading(false);
         }
@@ -239,6 +352,22 @@ export function OverviewSection() {
     // Calculate engagement metrics
     const engagementRate = safeOverview.videoCount > 0 ? safeOverview.totalViews / safeOverview.videoCount : 0;
     const viewsPerFollower = safeOverview.currentFollowers > 0 ? safeOverview.totalViews / safeOverview.currentFollowers : 0;
+
+    // Check if we should show zero data state
+    const isDisconnected = data?.connectionStatus?.twitch_connected === false;
+    const hasZeroData = data?.connectionStatus?.twitch_connected === true && 
+                        safeOverview.totalViews === 0 && 
+                        safeOverview.videoCount === 0 && 
+                        safeOverview.currentFollowers === 0;
+
+    // Show zero data state for disconnected users or connected users with no data
+    if (isDisconnected || hasZeroData) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
+                <ZeroDataState isConnected={!isDisconnected} />
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">

@@ -92,10 +92,51 @@ func (oc *OAuthConfig) StoreTokens(ctx context.Context, db database.Service, cle
 
 	scopesString := strings.Join(oc.config.Scopes, ",")
 
+	// Check if this user is switching to a different Twitch account
+	var currentTwitchUserID string
+	currentQuery := `SELECT twitch_user_id FROM user_twitch_tokens WHERE clerk_user_id = $1`
+	err = db.GetDB().QueryRowContext(ctx, currentQuery, clerkUserID).Scan(&currentTwitchUserID)
+
+	isAccountSwitch := false
+	if err == nil && currentTwitchUserID != twitchUserID {
+		isAccountSwitch = true
+		log.Printf("🔄 Account switch detected for user %s: %s -> %s", clerkUserID, currentTwitchUserID, twitchUserID)
+	}
+
 	// First, delete any existing tokens for this Twitch user ID to avoid conflicts
 	_, err = db.GetDB().ExecContext(ctx, `DELETE FROM user_twitch_tokens WHERE twitch_user_id = $1 AND clerk_user_id != $2`, twitchUserID, clerkUserID)
 	if err != nil {
 		return fmt.Errorf("failed to clean existing tokens: %w", err)
+	}
+
+	// If this is an account switch, clear all old analytics data
+	if isAccountSwitch {
+		log.Printf("🧹 Clearing old analytics data for account switch (user: %s)", clerkUserID)
+
+		// Clear analytics data in a goroutine to avoid blocking the auth flow
+		go func() {
+			// Clear cache entries
+			if _, err := db.GetDB().Exec(`DELETE FROM cache_entries WHERE user_id = $1`, clerkUserID); err != nil {
+				log.Printf("⚠️ Failed to clear cache during account switch for user %s: %v", clerkUserID, err)
+			}
+
+			// Clear video analytics
+			if _, err := db.GetDB().Exec(`DELETE FROM video_analytics WHERE user_id = $1`, clerkUserID); err != nil {
+				log.Printf("⚠️ Failed to clear video analytics during account switch for user %s: %v", clerkUserID, err)
+			}
+
+			// Clear channel analytics
+			if _, err := db.GetDB().Exec(`DELETE FROM channel_analytics WHERE user_id = $1`, clerkUserID); err != nil {
+				log.Printf("⚠️ Failed to clear channel analytics during account switch for user %s: %v", clerkUserID, err)
+			}
+
+			// Clear stream sessions
+			if _, err := db.GetDB().Exec(`DELETE FROM stream_sessions WHERE user_id = $1`, clerkUserID); err != nil {
+				log.Printf("⚠️ Failed to clear stream sessions during account switch for user %s: %v", clerkUserID, err)
+			}
+
+			log.Printf("✅ Analytics data cleanup completed for account switch (user: %s)", clerkUserID)
+		}()
 	}
 
 	query := `
@@ -116,7 +157,12 @@ func (oc *OAuthConfig) StoreTokens(ctx context.Context, db database.Service, cle
 		return fmt.Errorf("failed to store tokens: %w", err)
 	}
 
-	log.Printf("✅ Stored Twitch tokens for user %s (Twitch ID: %s)", clerkUserID, twitchUserID)
+	if isAccountSwitch {
+		log.Printf("✅ Account switch completed: Stored new Twitch tokens for user %s (New Twitch ID: %s)", clerkUserID, twitchUserID)
+	} else {
+		log.Printf("✅ Stored Twitch tokens for user %s (Twitch ID: %s)", clerkUserID, twitchUserID)
+	}
+
 	return nil
 }
 

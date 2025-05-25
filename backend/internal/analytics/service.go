@@ -211,25 +211,18 @@ func (s *service) CheckUserAnalyticsData(ctx context.Context, userID string) (bo
 	return hasData, lastUpdate, nil
 }
 
+// CheckTwitchConnection verifies if user has an active Twitch connection
 func (s *service) CheckTwitchConnection(ctx context.Context, userID string) (bool, error) {
-	// Use the same token helper approach as other parts of the system for consistency
-	tokenHelper, err := twitch.NewTwitchTokenHelper(s.standardDB)
+	var count int64
+	err := s.standardDB.GetDB().QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM user_twitch_tokens WHERE clerk_user_id = $1 AND encrypted_access_token IS NOT NULL AND encrypted_access_token != ''",
+		userID).Scan(&count)
+
 	if err != nil {
-		log.Printf("❌ Failed to create token helper for connection check: %v", err)
 		return false, err
 	}
 
-	// Try to get a valid token - this will handle refresh if needed
-	_, err = tokenHelper.GetValidTokenForUser(ctx, userID)
-	if err != nil {
-		if err.Error() == "twitch not connected" {
-			return false, nil // Not connected, but no error
-		}
-		log.Printf("❌ Token validation failed for user %s: %v", userID, err)
-		return false, err
-	}
-
-	return true, nil
+	return count > 0, nil
 }
 
 func (s *service) IsHealthy() bool {

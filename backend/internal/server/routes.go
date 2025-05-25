@@ -396,33 +396,27 @@ func (s *FiberServer) syncUserHandler(c *fiber.Ctx) error {
 	// If this is a new user with a Twitch connection, trigger their first data collection
 	if isNewUser {
 		log.Printf("🔍 syncUserHandler: Checking if new user %s has Twitch connection", user.ID)
-		// Check if user has Twitch connected via Clerk
-		clerkUser, clerkErr := clerk.GetUserByID(ctx, user.ID)
-		if clerkErr != nil {
-			log.Printf("⚠️ syncUserHandler: Failed to get Clerk user for %s (cross-env?): %v", user.ID, clerkErr)
-		} else {
-			hasTwitch := false
-			for _, account := range clerkUser.ExternalAccounts {
-				if account.Provider == "oauth_twitch" {
-					hasTwitch = true
-					break
+		// Check if user has Twitch connected via our token storage (not Clerk external accounts)
+		hasTwitch := false
+		if oauthConfig, err := twitch.NewOAuthConfig(); err == nil {
+			if _, err := oauthConfig.GetStoredTokens(ctx, s.db, user.ID); err == nil {
+				hasTwitch = true
+			}
+		}
+
+		log.Printf("📊 syncUserHandler: User %s has Twitch connection: %t", user.ID, hasTwitch)
+
+		if hasTwitch {
+			log.Printf("🚀 syncUserHandler: Triggering background collection for new user %s", user.ID)
+			// Trigger first-time data collection in background
+			go func() {
+				// Get the background collection manager from the server
+				if s.backgroundCollectionMgr != nil {
+					s.backgroundCollectionMgr.TriggerUserCollection(user.ID)
+				} else {
+					log.Printf("⚠️ Background collection manager not available for user %s", user.ID)
 				}
-			}
-
-			log.Printf("📊 syncUserHandler: User %s has Twitch connection: %t", user.ID, hasTwitch)
-
-			if hasTwitch {
-				log.Printf("🚀 syncUserHandler: Triggering background collection for new user %s", user.ID)
-				// Trigger first-time data collection in background
-				go func() {
-					// Get the background collection manager from the server
-					if s.backgroundCollectionMgr != nil {
-						s.backgroundCollectionMgr.TriggerUserCollection(user.ID)
-					} else {
-						log.Printf("⚠️ Background collection manager not available for user %s", user.ID)
-					}
-				}()
-			}
+			}()
 		}
 	}
 

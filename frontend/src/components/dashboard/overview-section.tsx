@@ -177,15 +177,15 @@ export function OverviewSection() {
                 
                 // Transform the analytics data for overview
                 const overviewData: OverviewData = {
-                    overview: analyticsData.overview || {
-                        totalViews: 0,
-                        videoCount: 0,
-                        averageViewsPerVideo: 0,
-                        totalWatchTimeHours: 0,
-                        currentFollowers: 0,
-                        currentSubscribers: 0,
-                        followerChange: 0,
-                        subscriberChange: 0,
+                    overview: {
+                        totalViews: analyticsData.overview?.totalViews || 0,
+                        videoCount: analyticsData.overview?.videoCount || 0,
+                        averageViewsPerVideo: analyticsData.overview?.averageViewsPerVideo || 0,
+                        totalWatchTimeHours: analyticsData.overview?.totalWatchTimeHours || 0,
+                        currentFollowers: analyticsData.overview?.currentFollowers || 0,
+                        currentSubscribers: analyticsData.overview?.currentSubscribers || 0,
+                        followerChange: analyticsData.overview?.followerChange || 0,
+                        subscriberChange: analyticsData.overview?.subscriberChange || 0,
                     },
                     recentVideos: (analyticsData.recentVideos || []).slice(0, 3),
                     connectionStatus: connectionStatus

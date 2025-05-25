@@ -13,16 +13,16 @@ import {
     Users
 } from 'lucide-react';
 import {
-    BarChart as RechartsBarChart,
-    Bar,
     XAxis,
     YAxis,
     CartesianGrid,
     Tooltip,
     ResponsiveContainer,
-    AreaChart,
-    Area
+    ScatterChart,
+    Scatter,
+    Cell
 } from 'recharts';
+import React from 'react';
 
 // Enhanced types for new dashboard design
 interface VideoBasedOverview {
@@ -65,6 +65,16 @@ interface EnhancedAnalytics {
     performance: PerformanceData;
     topVideos: VideoAnalytics[];
     recentVideos: VideoAnalytics[];
+}
+
+interface ContentDataPoint {
+    id: number;
+    title: string;
+    views: number;
+    date: number;
+    displayDate: string;
+    daysSince: number;
+    type: 'clip' | 'broadcast';
 }
 
 // Utility functions
@@ -152,187 +162,200 @@ const TimePeriodSelector = ({
     </div>
 );
 
-// Performance Over Time Chart
-const PerformanceChart = ({
-    data,
-    timeRange
+// Content Performance Timeline Chart
+const ContentPerformanceChart = ({
+    analytics,
+    timeRange,
+    onTimeRangeChange
 }: {
-    data: ChartDataPoint[];
+    analytics: EnhancedAnalytics | null;
     timeRange: string;
-}) => (
-    <motion.div
-        initial={{ y: 20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
-    >
-        <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold text-white">Performance Over Time</h3>
-            <TimePeriodSelector selected={timeRange} onSelect={() => { }} />
-        </div>
-        <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data}>
-                    <defs>
-                        <linearGradient id="viewsGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                        </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                    <XAxis
-                        dataKey="date"
-                        stroke="#9ca3af"
-                        fontSize={12}
-                        tickFormatter={(value) => {
-                            const date = new Date(value);
-                            return `${date.getMonth() + 1}/${date.getDate()}`;
-                        }}
-                    />
-                    <YAxis stroke="#9ca3af" fontSize={12} />
-                    <Tooltip
-                        contentStyle={{
-                            backgroundColor: '#1f2937',
-                            border: '1px solid #374151',
-                            borderRadius: '8px',
-                            color: '#fff'
-                        }}
-                        formatter={(value) => [formatNumber(value as number), 'Views']}
-                        labelFormatter={(label) => `Date: ${label}`}
-                    />
-                    <Area
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#10b981"
-                        strokeWidth={2}
-                        fill="url(#viewsGradient)"
-                    />
-                </AreaChart>
-            </ResponsiveContainer>
-        </div>
-        <div className="mt-6 text-center text-emerald-400 text-sm">
-            → views
-        </div>
-    </motion.div>
-);
+    onTimeRangeChange: (period: string) => void;
+}) => {
+    // Prepare data for scatter plot
+    const contentData = React.useMemo(() => {
+        if (!analytics) return [];
+        
+        // Get all available content data from different sources
+        const allContent = [
+            ...(analytics.topVideos || []),
+            ...(analytics.recentVideos || [])
+        ];
+        
+        // If we don't have video arrays, but have video count in overview, show helpful message
+        if (allContent.length === 0 && analytics.overview?.videoCount > 0) {
+            // Instead of mock data, return empty array to show the empty state
+            // The empty state will explain that video details are being processed
+            return [];
+        }
+        
+        // Remove duplicates and prepare scatter data
+        const uniqueContent = allContent.reduce((acc: ContentDataPoint[], video) => {
+            if (!acc.find(v => v.id === video.id)) {
+                const publishDate = new Date(video.publishedAt);
+                const daysSincePublish = Math.floor((Date.now() - publishDate.getTime()) / (1000 * 60 * 60 * 24));
+                
+                // Filter by time range
+                const timeRangeNum = parseInt(timeRange);
+                if (daysSincePublish <= timeRangeNum) {
+                    acc.push({
+                        id: video.id,
+                        title: video.title,
+                        views: video.viewCount,
+                        date: publishDate.getTime(),
+                        displayDate: publishDate.toLocaleDateString(),
+                        daysSince: daysSincePublish,
+                        type: video.title.toLowerCase().includes('clip') ? 'clip' : 'broadcast'
+                    });
+                }
+            }
+            return acc;
+        }, []);
+        
+        return uniqueContent.sort((a, b) => a.date - b.date);
+    }, [analytics, timeRange]);
 
-// Bottom stats row
-const BottomStatsRow = ({
-    totalViews,
-    watchTime,
-    avgViews
-}: {
-    totalViews: number | undefined | null;
-    watchTime: number | undefined | null;
-    avgViews: number | undefined | null;
-}) => (
-    <div className="grid grid-cols-3 gap-6">
-        <div className="text-center">
-            <p className="text-gray-400 text-sm mb-2">Views</p>
-            <p className="text-2xl font-bold text-white">{formatNumber(totalViews)}</p>
-        </div>
-        <div className="text-center">
-            <p className="text-gray-400 text-sm mb-2">Watch Time (est.)</p>
-            <p className="text-2xl font-bold text-white">{formatDuration(watchTime)}</p>
-        </div>
-        <div className="text-center">
-            <p className="text-gray-400 text-sm mb-2">Avg. Views/Video</p>
-            <p className="text-2xl font-bold text-white">{formatNumber(avgViews)}</p>
-        </div>
-    </div>
-);
+    const getContentColor = (type: string) => {
+        return type === 'clip' ? '#10b981' : '#3b82f6'; // Green for clips, blue for broadcasts
+    };
 
-// Growth metrics row
-const GrowthStatsRow = ({
-    followers,
-    subscribers,
-    followerChange,
-    subscriberChange
-}: {
-    followers: number | undefined | null;
-    subscribers: number | undefined | null;
-    followerChange: number | undefined | null;
-    subscriberChange: number | undefined | null;
-}) => (
-    <div className="grid grid-cols-2 gap-6">
-        <div className="text-center">
-            <p className="text-gray-400 text-sm mb-2">Followers</p>
-            <p className="text-2xl font-bold text-white">{formatNumber(followers)}</p>
-            {followerChange !== 0 && (
-                <p className={`text-sm mt-1 ${followerChange && followerChange > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {followerChange && followerChange > 0 ? '+' : ''}{followerChange}
-                </p>
-            )}
-        </div>
-        <div className="text-center">
-            <p className="text-gray-400 text-sm mb-2">Subscribers</p>
-            <p className="text-2xl font-bold text-white">{formatNumber(subscribers)}</p>
-            {subscriberChange !== 0 && (
-                <p className={`text-sm mt-1 ${subscriberChange && subscriberChange > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {subscriberChange && subscriberChange > 0 ? '+' : ''}{subscriberChange}
-                </p>
-            )}
-        </div>
-    </div>
-);
+    const averageViews = contentData.length > 0 
+        ? contentData.reduce((sum, item) => sum + item.views, 0) / contentData.length 
+        : 0;
 
-// Content Distribution Chart
-const ContentDistributionChart = ({
-    data
-}: {
-    data: ContentTypeData[];
-}) => (
-    <motion.div
-        initial={{ y: 20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
-    >
-        <h3 className="text-xl font-bold text-white mb-6">Content Distribution</h3>
-        <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-                <RechartsBarChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                    <XAxis
-                        dataKey="date"
-                        stroke="#9ca3af"
-                        fontSize={12}
-                        tickFormatter={(value) => {
-                            const date = new Date(value);
-                            return `${date.getMonth() + 1}/${date.getDate()}`;
-                        }}
-                    />
-                    <YAxis stroke="#9ca3af" fontSize={12} />
-                    <Tooltip
-                        contentStyle={{
-                            backgroundColor: '#1f2937',
-                            border: '1px solid #374151',
-                            borderRadius: '8px',
-                            color: '#fff'
-                        }}
-                    />
-                    <Bar dataKey="broadcasts" stackId="a" fill="#3b82f6" name="Broadcasts" />
-                    <Bar dataKey="clips" stackId="a" fill="#10b981" name="Clips" />
-                </RechartsBarChart>
-            </ResponsiveContainer>
-        </div>
-        <div className="flex justify-center mt-4 space-x-6">
-            <div className="flex items-center">
-                <div className="w-3 h-3 bg-blue-500 rounded mr-2"></div>
-                <span className="text-sm text-gray-400">Broadcasts</span>
+    return (
+        <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
+        >
+            <div className="flex items-center justify-between mb-6">
+                <div>
+                    <h3 className="text-xl font-bold text-white">Content Performance Timeline</h3>
+                    <p className="text-sm text-gray-400 mt-1">See which content resonates with your audience</p>
+                </div>
+                <TimePeriodSelector selected={timeRange} onSelect={onTimeRangeChange} />
             </div>
-            <div className="flex items-center">
-                <div className="w-3 h-3 bg-emerald-500 rounded mr-2"></div>
-                <span className="text-sm text-gray-400">Clips</span>
-            </div>
-        </div>
-    </motion.div>
-);
+            
+            {contentData.length > 0 ? (
+                <>
+                    <div className="h-80 mb-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ScatterChart data={contentData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                                <XAxis
+                                    type="number"
+                                    dataKey="date"
+                                    scale="time"
+                                    domain={['dataMin', 'dataMax']}
+                                    stroke="#9ca3af"
+                                    fontSize={12}
+                                    tickFormatter={(timestamp) => {
+                                        const date = new Date(timestamp);
+                                        return `${date.getMonth() + 1}/${date.getDate()}`;
+                                    }}
+                                />
+                                <YAxis
+                                    stroke="#9ca3af"
+                                    fontSize={12}
+                                    tickFormatter={(value) => formatNumber(value)}
+                                />
+                                <Tooltip
+                                    contentStyle={{
+                                        backgroundColor: '#1f2937',
+                                        border: '1px solid #374151',
+                                        borderRadius: '8px',
+                                        color: '#fff'
+                                    }}
+                                    formatter={(value: number) => [
+                                        `${formatNumber(value)} views`,
+                                        'Content'
+                                    ]}
+                                    labelFormatter={(label: string, payload: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+                                        if (payload && payload[0] && payload[0].payload) {
+                                            const data = payload[0].payload;
+                                            return `${data.title} (${data.displayDate})`;
+                                        }
+                                        return label;
+                                    }}
+                                />
+                                <Scatter dataKey="views" fill="#8884d8">
+                                    {contentData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={getContentColor(entry.type)} />
+                                    ))}
+                                </Scatter>
+                                {/* Average line */}
+                                {averageViews > 0 && (
+                                    <line
+                                        x1="0"
+                                        y1={`${100 - (averageViews / Math.max(...contentData.map(d => d.views))) * 100}%`}
+                                        x2="100%"
+                                        y2={`${100 - (averageViews / Math.max(...contentData.map(d => d.views))) * 100}%`}
+                                        stroke="#f59e0b"
+                                        strokeDasharray="5,5"
+                                        strokeWidth={2}
+                                        opacity={0.7}
+                                    />
+                                )}
+                            </ScatterChart>
+                        </ResponsiveContainer>
+                    </div>
+                    
+                    {/* Legend and Insights */}
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center space-x-6">
+                            <div className="flex items-center">
+                                <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
+                                <span className="text-sm text-gray-400">Broadcasts</span>
+                            </div>
+                            <div className="flex items-center">
+                                <div className="w-3 h-3 bg-emerald-500 rounded-full mr-2"></div>
+                                <span className="text-sm text-gray-400">Clips</span>
+                            </div>
+                            <div className="flex items-center">
+                                <div className="w-3 h-3 border-2 border-yellow-500 border-dashed rounded mr-2"></div>
+                                <span className="text-sm text-gray-400">Average ({formatNumber(averageViews)} views)</span>
+                            </div>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-sm text-gray-400">
+                                {contentData.length} pieces of content in last {timeRange} days
+                            </p>
+                        </div>
+                    </div>
+                </>
+            ) : (
+                <div className="text-center py-12">
+                    <Video className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    {analytics?.overview?.videoCount && analytics.overview.videoCount > 0 ? (
+                        <>
+                            <h4 className="text-lg font-medium text-gray-300 mb-2">Content Timeline Loading</h4>
+                            <p className="text-gray-400">
+                                We found {analytics.overview.videoCount} videos with {formatNumber(analytics.overview.totalViews)} total views, 
+                                but detailed video data is still being processed.
+                            </p>
+                            <p className="text-gray-500 text-sm mt-2">
+                                Try clicking "Update Data" to refresh your content details.
+                            </p>
+                        </>
+                    ) : (
+                        <>
+                            <h4 className="text-lg font-medium text-gray-300 mb-2">No content in this period</h4>
+                            <p className="text-gray-400">Try a longer time range or create more content!</p>
+                        </>
+                    )}
+                </div>
+            )}
+        </motion.div>
+    );
+};
 
 export default function AnalyticsPage() {
     const { isLoaded, isSignedIn, getToken } = useAuth();
     const [analytics, setAnalytics] = useState<EnhancedAnalytics | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [timeRange] = useState('30');
+    const [timeRange, setTimeRange] = useState('30');
 
     // Helper function to get API base URL based on environment
     const getApiBaseUrl = () => {
@@ -418,9 +441,20 @@ export default function AnalyticsPage() {
         }
     };
 
+    const handleTimeRangeChange = (newTimeRange: string) => {
+        setTimeRange(newTimeRange);
+    };
+
     useEffect(() => {
         fetchAnalyticsData();
     }, [fetchAnalyticsData]);
+
+    // Fetch data when time range changes
+    useEffect(() => {
+        if (isLoaded && isSignedIn) {
+            fetchAnalyticsData();
+        }
+    }, [timeRange, isLoaded, isSignedIn, fetchAnalyticsData]);
 
     if (!isLoaded || !isSignedIn) {
         return (
@@ -449,8 +483,9 @@ export default function AnalyticsPage() {
         subscriberChange: analytics?.overview?.subscriberChange ?? 0
     };
 
-    const safePerformanceData = analytics?.performance?.viewsOverTime || [];
-    const safeContentData = analytics?.performance?.contentDistribution || [];
+    // Calculate some streamer-focused metrics
+    const viewsPerFollower = safeOverview.currentFollowers > 0 ? safeOverview.totalViews / safeOverview.currentFollowers : 0;
+    const engagementRate = safeOverview.totalViews / Math.max(safeOverview.videoCount, 1);
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
@@ -460,17 +495,17 @@ export default function AnalyticsPage() {
                     <div>
                         <div className="flex items-center mb-2">
                             <BarChart3 className="w-6 h-6 text-emerald-500 mr-2" />
-                            <span className="text-sm text-emerald-400 font-medium">Performance Metrics</span>
+                            <span className="text-sm text-emerald-400 font-medium">Channel Analytics</span>
                         </div>
-                        <h1 className="text-3xl font-bold text-white">Detailed Analytics</h1>
-                        <p className="text-gray-400 mt-2">Track your growth and understand your audience better with in-depth analytics.</p>
+                        <h1 className="text-3xl font-bold text-white">Your Channel Performance</h1>
+                        <p className="text-gray-400 mt-2">Track your content performance and understand what resonates with your audience.</p>
                     </div>
                     <div className="flex space-x-3">
                         <button
                             onClick={handleManualCollection}
                             className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
                         >
-                            Collect Data
+                            Update Data
                         </button>
                         <button
                             onClick={handleRefresh}
@@ -483,83 +518,165 @@ export default function AnalyticsPage() {
                     </div>
                 </div>
 
-                {/* Top Metrics Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+                {/* Key Metrics Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <EnhancedMetricCard
+                        title="Total Content"
+                        value={safeOverview.videoCount}
+                        subtitle="Videos & clips on your channel"
+                        icon={Video}
+                        gradient="from-purple-500/10 to-pink-500/5"
+                    />
                     <EnhancedMetricCard
                         title="Total Views"
                         value={safeOverview.totalViews}
-                        subtitle={`Across ${safeOverview.videoCount} videos`}
+                        subtitle={`${formatNumber(engagementRate)} avg per video`}
                         icon={Eye}
                         gradient="from-emerald-500/10 to-teal-500/5"
                     />
                     <EnhancedMetricCard
                         title="Followers"
                         value={safeOverview.currentFollowers}
-                        subtitle="Total followers"
+                        subtitle={viewsPerFollower > 0 ? `${formatNumber(viewsPerFollower)} views per follower` : "Growing your community"}
                         icon={Heart}
                         gradient="from-rose-500/10 to-pink-500/5"
                     />
                     <EnhancedMetricCard
                         title="Subscribers"
                         value={safeOverview.currentSubscribers}
-                        subtitle="Total subscribers"
+                        subtitle="Supporting your channel"
                         icon={Users}
                         gradient="from-violet-500/10 to-purple-500/5"
                     />
-                    <EnhancedMetricCard
-                        title="Average Views"
-                        value={Math.round(safeOverview.averageViewsPerVideo)}
-                        subtitle="Per video"
-                        icon={TrendingUp}
-                        gradient="from-blue-500/10 to-indigo-500/5"
-                    />
-                    <EnhancedMetricCard
-                        title="Content Count"
-                        value={safeOverview.videoCount}
-                        subtitle="Videos on your channel"
-                        icon={Video}
-                        gradient="from-purple-500/10 to-pink-500/5"
-                    />
                 </div>
 
-                {/* Performance Over Time Chart */}
+                {/* Content Performance Chart */}
                 <div className="mb-8">
-                    <PerformanceChart data={safePerformanceData} timeRange={timeRange} />
+                    <ContentPerformanceChart analytics={analytics} timeRange={timeRange} onTimeRangeChange={handleTimeRangeChange} />
                 </div>
 
-                {/* Bottom Stats and Content Distribution */}
+                {/* Bottom Grid - Actionable Insights */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Performance Stats */}
+                    {/* Content Breakdown */}
                     <motion.div
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
                     >
-                        <h3 className="text-lg font-semibold text-white mb-4">Performance</h3>
-                        <BottomStatsRow
-                            totalViews={safeOverview.totalViews}
-                            watchTime={safeOverview.totalWatchTimeHours}
-                            avgViews={safeOverview.averageViewsPerVideo}
-                        />
+                        <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                            <Video className="w-5 h-5 mr-2 text-emerald-400" />
+                            Content Breakdown
+                        </h3>
+                        <div className="space-y-4">
+                            <div>
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-gray-300">Average Views</span>
+                                    <span className="text-white font-semibold">{formatNumber(safeOverview.averageViewsPerVideo)}</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded-full h-2">
+                                    <div 
+                                        className="bg-emerald-500 h-2 rounded-full" 
+                                        style={{ width: `${Math.min((safeOverview.averageViewsPerVideo / Math.max(safeOverview.totalViews / Math.max(safeOverview.videoCount, 1), 1)) * 100, 100)}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-gray-300">Total Watch Time</span>
+                                    <span className="text-white font-semibold">{formatDuration(safeOverview.totalWatchTimeHours)}</span>
+                                </div>
+                            </div>
+                            <div className="pt-2 border-t border-gray-700">
+                                <p className="text-sm text-gray-400">
+                                    {safeOverview.videoCount > 0 ? 
+                                        `You have ${safeOverview.videoCount} pieces of content generating ${formatNumber(safeOverview.totalViews)} total views.` :
+                                        "Start creating content to see your analytics here!"
+                                    }
+                                </p>
+                            </div>
+                        </div>
                     </motion.div>
 
-                    {/* Growth Metrics */}
+                    {/* Channel Growth Insights */}
                     <motion.div
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
                     >
-                        <h3 className="text-lg font-semibold text-white mb-4">Growth</h3>
-                        <GrowthStatsRow
-                            followers={safeOverview.currentFollowers}
-                            subscribers={safeOverview.currentSubscribers}
-                            followerChange={safeOverview.followerChange}
-                            subscriberChange={safeOverview.subscriberChange}
-                        />
+                        <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                            <TrendingUp className="w-5 h-5 mr-2 text-emerald-400" />
+                            Channel Health
+                        </h3>
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center">
+                                <span className="text-gray-300">Followers</span>
+                                <span className="text-white font-semibold">{formatNumber(safeOverview.currentFollowers)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-gray-300">Subscribers</span>
+                                <span className="text-white font-semibold">{formatNumber(safeOverview.currentSubscribers)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-gray-300">Sub Rate</span>
+                                <span className="text-white font-semibold">
+                                    {safeOverview.currentFollowers > 0 ? 
+                                        `${((safeOverview.currentSubscribers / safeOverview.currentFollowers) * 100).toFixed(1)}%` : 
+                                        '0%'
+                                    }
+                                </span>
+                            </div>
+                            <div className="pt-2 border-t border-gray-700">
+                                <p className="text-sm text-gray-400">
+                                    {safeOverview.currentSubscribers > 0 ? 
+                                        `${safeOverview.currentSubscribers} of your ${formatNumber(safeOverview.currentFollowers)} followers are subscribers.` :
+                                        "Encourage followers to subscribe for steady support!"
+                                    }
+                                </p>
+                            </div>
+                        </div>
                     </motion.div>
 
-                    {/* Content Distribution */}
-                    <ContentDistributionChart data={safeContentData} />
+                    {/* Quick Actions & Tips */}
+                    <motion.div
+                        initial={{ y: 20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        className="bg-gray-900/50 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6"
+                    >
+                        <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                            <BarChart3 className="w-5 h-5 mr-2 text-emerald-400" />
+                            Quick Insights
+                        </h3>
+                        <div className="space-y-3">
+                            {safeOverview.averageViewsPerVideo > 0 && (
+                                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                                    <p className="text-sm text-emerald-300">
+                                        <strong>Great!</strong> Your content averages {formatNumber(safeOverview.averageViewsPerVideo)} views per video.
+                                    </p>
+                                </div>
+                            )}
+                            {safeOverview.videoCount > 10 && (
+                                <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                                    <p className="text-sm text-blue-300">
+                                        <strong>Consistent Creator:</strong> You have {safeOverview.videoCount} pieces of content!
+                                    </p>
+                                </div>
+                            )}
+                            {safeOverview.currentSubscribers === 0 && safeOverview.currentFollowers > 10 && (
+                                <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                                    <p className="text-sm text-yellow-300">
+                                        <strong>Tip:</strong> Consider encouraging subscriptions during streams!
+                                    </p>
+                                </div>
+                            )}
+                            {safeOverview.videoCount === 0 && (
+                                <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+                                    <p className="text-sm text-purple-300">
+                                        <strong>Get Started:</strong> Create your first content to see analytics here!
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </motion.div>
                 </div>
             </div>
         </div>

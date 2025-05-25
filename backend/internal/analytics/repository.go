@@ -253,12 +253,31 @@ func (r *repository) GetVideoAnalytics(ctx context.Context, userID string, limit
 			   like_count, comment_count, thumbnail_url, published_at, created_at, updated_at
 		FROM video_analytics 
 		WHERE user_id = $1 
-		ORDER BY published_at DESC 
+		ORDER BY COALESCE(published_at, created_at) DESC 
 		LIMIT $2
 	`
 
+	log.Printf("🔍 GetVideoAnalytics: Querying for user %s with limit %d", userID, limit)
+	log.Printf("🔍 Query: %s", query)
+
 	var videos []VideoAnalytics
 	err := r.getDB().SelectContext(ctx, &videos, query, userID, limit)
+
+	if err != nil {
+		log.Printf("❌ GetVideoAnalytics error for user %s: %v", userID, err)
+		return videos, err
+	}
+
+	log.Printf("📊 GetVideoAnalytics: Found %d videos for user %s", len(videos), userID)
+
+	// Debug log a few video details if found
+	for i, video := range videos {
+		if i < 3 { // Only log first 3 to avoid spam
+			log.Printf("📹 Video %d: ID=%s, Title=%s, Views=%d, Published=%v",
+				i+1, video.VideoID, video.Title, video.ViewCount, video.PublishedAt)
+		}
+	}
+
 	return videos, err
 }
 
